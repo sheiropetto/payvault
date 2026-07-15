@@ -178,7 +178,7 @@ export default function BankStatements() {
                             ? <FileText className="w-4 h-4 text-red-500" strokeWidth={1.5} />
                             : <FileSpreadsheet className="w-4 h-4 text-green-600" strokeWidth={1.5} />
                           }
-                          <span className="truncate max-w-[200px]">{stmt.filename}</span>
+                          <span className="truncate max-w-[450px]" title={stmt.filename}>{stmt.filename}</span>
                         </div>
                       </td>
                       <td className="text-zinc-600">{stmt.company_name}</td>
