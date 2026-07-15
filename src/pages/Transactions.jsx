@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Filter, Search, Save, CheckCircle2, AlertCircle,
   ArrowUpDown, ArrowUp, ArrowDown, Maximize2, Minimize2,
-  CheckSquare, Square, FileText, Replace, Printer
+  CheckSquare, Square, FileText, Replace, Printer, Check
 } from 'lucide-react';
 import { api } from '../utils/api';
 import { useCompany } from '../contexts/CompanyContext';
@@ -146,6 +146,23 @@ export default function Transactions() {
     combine: false,
   });
 
+  // Column Filters
+  const [columnFilters, setColumnFilters] = useState({
+    payee: '',
+    category: '',
+    vouchered: '', // 'yes', 'no', or ''
+  });
+  const [activeFilterPopover, setActiveFilterPopover] = useState(null); // 'payee' | 'category' | 'vouchered' | null
+  const [payeeFilterSearch, setPayeeFilterSearch] = useState('');
+
+  const uniquePayees = useMemo(() => {
+    return [...new Set(transactions.map(t => t.payee).filter(Boolean))].sort();
+  }, [transactions]);
+
+  const uniqueCategories = useMemo(() => {
+    return [...new Set(transactions.map(t => t.category).filter(Boolean))].sort();
+  }, [transactions]);
+
   useEffect(() => {
     if (selectedCompanyId) loadStatements();
   }, [selectedCompanyId]);
@@ -174,9 +191,20 @@ export default function Transactions() {
       const matchType = filterType === 'all' ||
         (filterType === 'debit' && (tx.debit_amount > 0)) ||
         (filterType === 'credit' && (tx.credit_amount > 0));
-      return matchSearch && matchCategory && matchType;
+
+      const matchColCategory = !columnFilters.category || tx.category === columnFilters.category;
+
+      const matchColPayee = !columnFilters.payee ||
+        tx.payee === columnFilters.payee ||
+        (tx.description && tx.description.toLowerCase().includes(columnFilters.payee.toLowerCase()));
+
+      const matchColVouchered = !columnFilters.vouchered ||
+        (columnFilters.vouchered === 'yes' && tx.is_vouchered) ||
+        (columnFilters.vouchered === 'no' && !tx.is_vouchered);
+
+      return matchSearch && matchCategory && matchType && matchColCategory && matchColPayee && matchColVouchered;
     });
-  }, [transactions, search, filterCategory, filterType]);
+  }, [transactions, search, filterCategory, filterType, columnFilters]);
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -386,6 +414,12 @@ export default function Transactions() {
 
   return (
     <div>
+      {activeFilterPopover && (
+        <div
+          className="fixed inset-0 z-20 cursor-default"
+          onClick={() => setActiveFilterPopover(null)}
+        />
+      )}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-lg font-semibold text-zinc-900">Transactions</h1>
@@ -650,19 +684,127 @@ export default function Transactions() {
                       className={`select-none ${col.className || ''}`}
                       initialWidth={col.width}
                     >
-                      <span
-                        className={`inline-flex items-center gap-1 cursor-pointer hover:text-zinc-900 ${col.key ? '' : ''}`}
-                        onClick={() => col.key && toggleSort(col.key)}
-                      >
-                        {col.label}
-                        {col.key === sortField ? (
-                          sortDir === 'asc'
-                            ? <ArrowUp className="w-3 h-3" strokeWidth={2} />
-                            : <ArrowDown className="w-3 h-3" strokeWidth={2} />
-                        ) : col.key ? (
-                          <ArrowUpDown className="w-3 h-3 text-zinc-300" strokeWidth={1.5} />
-                        ) : null}
-                      </span>
+                      <div className="flex items-center justify-between gap-1 w-full relative">
+                        <span
+                          className={`inline-flex items-center gap-1 cursor-pointer hover:text-zinc-900 ${col.key ? '' : ''}`}
+                          onClick={() => col.key && toggleSort(col.key)}
+                        >
+                          {col.label}
+                          {col.key === sortField ? (
+                            sortDir === 'asc'
+                              ? <ArrowUp className="w-3 h-3" strokeWidth={2} />
+                              : <ArrowDown className="w-3 h-3" strokeWidth={2} />
+                          ) : col.key ? (
+                            <ArrowUpDown className="w-3 h-3 text-zinc-300" strokeWidth={1.5} />
+                          ) : null}
+                        </span>
+
+                        {/* Column Filter Popover */}
+                        {['payee', 'category', 'vouchered'].includes(col.key || (col.label === 'Vouchered' ? 'vouchered' : '')) && (
+                          <div className="relative">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const type = col.key || 'vouchered';
+                                setActiveFilterPopover(activeFilterPopover === type ? null : type);
+                                if (type === 'payee') setPayeeFilterSearch('');
+                              }}
+                              className={`p-0.5 rounded hover:bg-zinc-200 transition-colors ${columnFilters[col.key || 'vouchered'] ? 'bg-zinc-100' : ''}`}
+                              title="Filter column"
+                            >
+                              <Filter
+                                className={`w-3.5 h-3.5 ${columnFilters[col.key || 'vouchered'] ? 'text-zinc-950 fill-zinc-900 font-bold' : 'text-zinc-400 hover:text-zinc-600'}`}
+                                strokeWidth={2}
+                              />
+                            </button>
+
+                            {activeFilterPopover === (col.key || 'vouchered') && (
+                              <div className="absolute top-full right-0 mt-1.5 p-2 bg-white border border-zinc-200 rounded-lg shadow-lg z-30 min-w-48 text-left font-normal normal-case text-xs text-zinc-700">
+                                {col.key === 'payee' && (
+                                  <input
+                                    className="input py-1 px-2 text-xs mb-2"
+                                    placeholder="Search payee..."
+                                    value={payeeFilterSearch}
+                                    onChange={(e) => setPayeeFilterSearch(e.target.value)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    autoFocus
+                                  />
+                                )}
+
+                                <div className="max-h-48 overflow-y-auto space-y-0.5">
+                                  <button
+                                    onClick={() => {
+                                      setColumnFilters(prev => ({ ...prev, [col.key || 'vouchered']: '' }));
+                                      setActiveFilterPopover(null);
+                                    }}
+                                    className="w-full text-left px-2 py-1.5 rounded hover:bg-zinc-50 flex items-center justify-between"
+                                  >
+                                    <span className="font-medium text-zinc-500">All / Clear</span>
+                                    {!columnFilters[col.key || 'vouchered'] && <Check className="w-3 h-3 text-zinc-900" strokeWidth={2} />}
+                                  </button>
+
+                                  {col.key === 'category' && uniqueCategories.map(c => (
+                                    <button
+                                      key={c}
+                                      onClick={() => {
+                                        setColumnFilters(prev => ({ ...prev, category: c }));
+                                        setActiveFilterPopover(null);
+                                      }}
+                                      className="w-full text-left px-2 py-1.5 rounded hover:bg-zinc-50 flex items-center justify-between"
+                                    >
+                                      <span>{c}</span>
+                                      {columnFilters.category === c && <Check className="w-3 h-3 text-zinc-900" strokeWidth={2} />}
+                                    </button>
+                                  ))}
+
+                                  {col.key === 'payee' && uniquePayees
+                                    .filter(p => p.toLowerCase().includes(payeeFilterSearch.toLowerCase()))
+                                    .slice(0, 30)
+                                    .map(p => (
+                                      <button
+                                        key={p}
+                                        onClick={() => {
+                                          setColumnFilters(prev => ({ ...prev, payee: p }));
+                                          setActiveFilterPopover(null);
+                                        }}
+                                        className="w-full text-left px-2 py-1.5 rounded hover:bg-zinc-50 flex items-center justify-between"
+                                      >
+                                        <span className="truncate pr-1">{p}</span>
+                                        {columnFilters.payee === p && <Check className="w-3 h-3 text-zinc-900" strokeWidth={2} />}
+                                      </button>
+                                    ))
+                                  }
+
+                                  {col.label === 'Vouchered' && (
+                                    <>
+                                      <button
+                                        onClick={() => {
+                                          setColumnFilters(prev => ({ ...prev, vouchered: 'yes' }));
+                                          setActiveFilterPopover(null);
+                                        }}
+                                        className="w-full text-left px-2 py-1.5 rounded hover:bg-zinc-50 flex items-center justify-between"
+                                      >
+                                        <span>Vouchered Only</span>
+                                        {columnFilters.vouchered === 'yes' && <Check className="w-3 h-3 text-zinc-900" strokeWidth={2} />}
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          setColumnFilters(prev => ({ ...prev, vouchered: 'no' }));
+                                          setActiveFilterPopover(null);
+                                        }}
+                                        className="w-full text-left px-2 py-1.5 rounded hover:bg-zinc-50 flex items-center justify-between"
+                                      >
+                                        <span>Not Vouchered Only</span>
+                                        {columnFilters.vouchered === 'no' && <Check className="w-3 h-3 text-zinc-900" strokeWidth={2} />}
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </ResizableTh>
                   ))}
                 </tr>
