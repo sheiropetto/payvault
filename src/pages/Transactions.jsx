@@ -735,7 +735,7 @@ export default function Transactions() {
             <table className="sheet-grid">
               <thead>
                 <tr>
-                  <th className="w-10 px-2 py-3 border-b border-zinc-200 bg-zinc-50" />
+                  <th className="w-16 px-2 py-3 border-b border-zinc-200 bg-zinc-50" />
                   {[
                     { key: 'date', label: 'Date', width: 110 },
                     { key: 'description', label: 'Description / Payee', width: 260 },
@@ -745,7 +745,6 @@ export default function Transactions() {
                     { key: 'debit_amount', label: 'Debit (RM)', width: 120, className: 'text-right' },
                     { key: 'credit_amount', label: 'Credit (RM)', width: 120, className: 'text-right' },
                     { key: 'balance', label: 'Balance', width: 120, className: 'text-right' },
-                    { key: null, label: 'Vouchered', width: 80, className: 'text-center' },
                   ].map(col => (
                     <ResizableTh
                       key={col.key || 'vouchered'}
@@ -883,15 +882,20 @@ export default function Transactions() {
                   return (
                     <tr key={tx.id}>
                       <td className="text-center align-middle px-2">
-                        <button
-                          onClick={() => toggleSelect(tx.id)}
-                          className="text-zinc-400 hover:text-zinc-700"
-                        >
-                          {selected.has(tx.id)
-                            ? <CheckSquare className="w-4 h-4" strokeWidth={1.5} />
-                            : <Square className="w-4 h-4" strokeWidth={1.5} />
-                          }
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => toggleSelect(tx.id)}
+                            className="text-zinc-400 hover:text-zinc-700"
+                          >
+                            {selected.has(tx.id)
+                              ? <CheckSquare className="w-4 h-4" strokeWidth={1.5} />
+                              : <Square className="w-4 h-4" strokeWidth={1.5} />
+                            }
+                          </button>
+                          {tx.is_vouchered && (
+                            <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" strokeWidth={1.5} title="Vouchered" />
+                          )}
+                        </div>
                       </td>
                       <td>
                         <input
@@ -950,13 +954,6 @@ export default function Transactions() {
                       </td>
                       <td className="text-right text-zinc-600 text-sm align-middle px-3 py-2">
                         {tx.balance != null ? Number(tx.balance).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
-                      </td>
-                      <td className="text-center">
-                        {tx.is_vouchered ? (
-                          <CheckCircle2 className="w-4 h-4 text-green-500 inline" strokeWidth={1.5} />
-                        ) : (
-                          <span className="text-sm text-zinc-300">—</span>
-                        )}
                       </td>
                     </tr>
                   );
