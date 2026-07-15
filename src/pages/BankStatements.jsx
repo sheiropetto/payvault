@@ -53,13 +53,17 @@ export default function BankStatements() {
   async function handleUpload(files) {
     if (!files.length || !selectedCompanyId) return;
     setUploading(true);
+    setStatusMsg(null);
     try {
       for (const file of files) {
         await api.uploadStatement(file, selectedCompanyId);
       }
+      setStatusMsg({ type: 'success', text: 'Upload successful!' });
       await loadData();
+      setTimeout(() => setStatusMsg(null), 5000);
     } catch (err) {
       console.error(err);
+      setStatusMsg({ type: 'error', text: 'Upload failed: ' + err.message });
     } finally {
       setUploading(false);
       fileRef.current.value = '';

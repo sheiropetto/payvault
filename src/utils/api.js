@@ -41,11 +41,18 @@ export const api = {
   // Bank Statements
   getStatements: (companyId) => request(`/bank-statements${companyId ? `?company_id=${companyId}` : ''}`),
   getStatement: (id) => request(`/bank-statements/${id}`),
-  uploadStatement: (file, companyId) => {
+  uploadStatement: async (file, companyId) => {
     const form = new FormData();
     form.append('file', file);
     form.append('company_id', companyId);
-    return fetch(`${BASE}/bank-statements`, { method: 'POST', body: form }).then(r => r.json());
+    const headers = {};
+    if (_userEmail) headers['X-User-Email'] = _userEmail;
+    const res = await fetch(`${BASE}/bank-statements`, { method: 'POST', headers, body: form });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || 'Upload failed');
+    }
+    return res.json();
   },
   deleteStatement: (id) => request(`/bank-statements/${id}`, { method: 'DELETE' }),
 
