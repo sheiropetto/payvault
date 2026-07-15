@@ -1,0 +1,17 @@
+name = "payvault"
+pages_build_output_dir = "dist"
+compatibility_date = "2024-09-01"
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "payvault-db"
+database_id = "74212605-8c7b-4272-a14e-d945d771e05c"
+
+# R2 Bucket for file storage
+[[r2_buckets]]
+binding = "STORAGE"
+bucket_name = "payvault-storage"
+
+[vars]
+# Gemini API key is set via wrangler pages secret put GEMINI_API_KEY
