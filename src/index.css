@@ -52,9 +52,20 @@
 
   .input {
     @apply block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2
-           text-sm text-zinc-900 placeholder-zinc-400
-           focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900
-           disabled:bg-zinc-50 disabled:text-zinc-500;
+           text-sm text-zinc-900 placeholder-zinc-400 transition-all duration-150
+           focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 focus:outline-none
+           hover:border-zinc-400 disabled:bg-zinc-50 disabled:text-zinc-500;
+  }
+
+  select.input {
+    @apply pr-10 cursor-pointer appearance-none bg-no-repeat;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2371717a' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    background-position: right 0.75rem center;
+    background-size: 1.25rem;
+  }
+
+  select.input option {
+    @apply py-2 px-3 text-zinc-900 bg-white;
   }
 
   .label {

@@ -55,7 +55,7 @@ export default function Sidebar({ collapsed, onToggle }) {
 
       {/* Company Switcher */}
       {!collapsed && (
-        <div className="px-3 py-2 border-b border-zinc-200" ref={dropdownRef}>
+        <div className="px-3 py-2 border-b border-zinc-200 relative" ref={dropdownRef}>
           <button
             onClick={() => setCompanyOpen(!companyOpen)}
             className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg
@@ -71,7 +71,7 @@ export default function Sidebar({ collapsed, onToggle }) {
           </button>
 
           {companyOpen && (
-            <div className="mt-1 py-1 bg-white border border-zinc-200 rounded-lg shadow-sm">
+            <div className="absolute left-3 right-3 mt-1 py-1 bg-white border border-zinc-200 rounded-lg shadow-lg z-50">
               {companies.map((c) => (
                 <button
                   key={c.id}
@@ -103,19 +103,24 @@ export default function Sidebar({ collapsed, onToggle }) {
       )}
 
       {/* Navigation */}
-      <nav className="flex-1 py-3 px-2 space-y-1 overflow-y-auto">
+      <nav className={`flex-1 py-3 px-2 space-y-1 ${collapsed ? 'overflow-visible' : 'overflow-y-auto'}`}>
         {navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
             end={item.to === '/'}
             className={({ isActive }) =>
-              `sidebar-link ${isActive ? 'active' : ''} ${collapsed ? 'justify-center px-2' : ''}`
+              `sidebar-link relative group ${isActive ? 'active' : ''} ${collapsed ? 'justify-center px-2' : ''}`
             }
-            title={collapsed ? item.label : undefined}
           >
             <item.icon className="w-4.5 h-4.5 shrink-0" strokeWidth={1.5} />
-            {!collapsed && <span>{item.label}</span>}
+            {!collapsed ? (
+              <span>{item.label}</span>
+            ) : (
+              <span className="pointer-events-none absolute left-full ml-2 px-2 py-1 bg-zinc-900 text-white text-[11px] font-medium rounded opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap z-50 shadow-md">
+                {item.label}
+              </span>
+            )}
           </NavLink>
         ))}
       </nav>
