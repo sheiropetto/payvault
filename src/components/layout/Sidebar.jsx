@@ -18,8 +18,7 @@ const navItems = [
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 
-export default function Sidebar() {
-  const [collapsed, setCollapsed] = useState(false);
+export default function Sidebar({ collapsed, onToggle }) {
   const [companyOpen, setCompanyOpen] = useState(false);
   const navigate = useNavigate();
   const dropdownRef = useRef(null);
@@ -123,7 +122,7 @@ export default function Sidebar() {
 
       {/* Collapse toggle */}
       <button
-        onClick={() => setCollapsed(!collapsed)}
+        onClick={onToggle}
         className="flex items-center justify-center h-10 mx-2 mb-2 rounded-lg
           text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 transition-colors"
       >
