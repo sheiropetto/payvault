@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  Building2, Plus, Pencil, Trash2, Check, X
+  Building2, Plus, Pencil, Trash2, Check, X, Phone, Mail
 } from 'lucide-react';
 import { api } from '../utils/api';
 import { useCompany } from '../contexts/CompanyContext';
@@ -118,11 +118,11 @@ export default function Companies() {
               <div className="space-y-1.5 text-xs text-zinc-600 mb-4">
                 {c.address && <p>{c.address}</p>}
                 <div className="flex gap-4">
-                  {c.phone && <span>📞 {c.phone}</span>}
-                  {c.email && <span>✉ {c.email}</span>}
+                  {c.phone && <span className="flex items-center gap-1"><Phone className="w-3.5 h-3.5" strokeWidth={1.5} />{c.phone}</span>}
+                  {c.email && <span className="flex items-center gap-1"><Mail className="w-3.5 h-3.5" strokeWidth={1.5} />{c.email}</span>}
                 </div>
                 {c.bank_name && c.bank_account && (
-                  <p className="text-zinc-500">🏦 {c.bank_name} — {c.bank_account}</p>
+                  <p className="text-zinc-500 flex items-center gap-1"><Building2 className="w-3.5 h-3.5" strokeWidth={1.5} />{c.bank_name} — {c.bank_account}</p>
                 )}
               </div>
 

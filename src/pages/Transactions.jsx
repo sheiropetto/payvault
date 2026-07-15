@@ -2,12 +2,12 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Filter, Search, Save, CheckCircle2, AlertCircle,
   ArrowUpDown, ArrowUp, ArrowDown, Maximize2, Minimize2,
-  CheckSquare, Square, FileText
+  CheckSquare, Square, FileText, Replace, Printer, Download
 } from 'lucide-react';
 import { api } from '../utils/api';
 import { useCompany } from '../contexts/CompanyContext';
 import { useFullView } from '../contexts/FullViewContext';
-import { generateB5VoucherHTML, printB5Vouchers } from '../utils/format';
+import { generateB5VoucherHTML, printB5Vouchers, downloadB5PDF } from '../utils/format';
 import EmptyState from '../components/ui/EmptyState';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 
@@ -132,6 +132,18 @@ export default function Transactions() {
   const [selected, setSelected] = useState(new Set());
   const [sortField, setSortField] = useState('date');
   const [sortDir, setSortDir] = useState('asc');
+
+  // Find & Replace
+  const [showFindReplace, setShowFindReplace] = useState(false);
+  const [findText, setFindText] = useState('');
+  const [replaceText, setReplaceText] = useState('');
+
+  // Print settings
+  const [printSettings, setPrintSettings] = useState({
+    pageSize: 'A5',
+    orientation: 'landscape',
+    combine: false,
+  });
 
   useEffect(() => {
     if (selectedCompanyId) loadStatements();
@@ -270,15 +282,37 @@ export default function Transactions() {
     setSelected(new Set());
   }
 
-  async function handleGenerateVouchers() {
-    const selectedTxs = sorted.filter(tx => selected.has(tx.id) && tx.debit_amount > 0);
-    if (!selectedTxs.length) return;
+  // Step 1: Convert selected to vouchers (DB write only)
+  async function handleConvertToVouchers() {
+    const newTxs = sorted.filter(tx => selected.has(tx.id) && tx.debit_amount > 0 && !tx.is_vouchered);
+    if (!newTxs.length) return;
 
-    const alreadyVouchered = selectedTxs.filter(tx => tx.is_vouchered);
-    const newTxs = selectedTxs.filter(tx => !tx.is_vouchered);
+    try {
+      for (const tx of newTxs) {
+        await api.createVoucher({
+          company_id: selectedCompanyId,
+          payee: tx.payee || '',
+          amount: tx.debit_amount || 0,
+          date: tx.date || '',
+          description: tx.description || '',
+          category: tx.category || '',
+          payment_method: 'Transfer',
+          status: 'approved',
+          transaction_ids: [tx.id],
+        });
+      }
+      setSaveStatus({ type: 'success', message: `${newTxs.length} voucher(s) created.` });
+      await loadTransactions(selectedStmt);
+      // Keep selection so user can print immediately
+      setTimeout(() => setSaveStatus(null), 4000);
+    } catch (err) {
+      setSaveStatus({ type: 'error', message: err.message });
+    }
+  }
 
-    // Build HTML for ALL selected (both new and reprint)
-    const html = selectedTxs.map(tx =>
+  // Build voucher HTML respecting settings (including combine)
+  function buildVoucherHTML(txs) {
+    const items = txs.map(tx =>
       generateB5VoucherHTML({
         payee: tx.payee || '',
         date: tx.date || '',
@@ -286,39 +320,73 @@ export default function Transactions() {
         amount: tx.debit_amount || 0,
         paymentMethod: 'Transfer',
         company: selectedCompany || {},
+        ...printSettings,
       })
-    ).join('');
+    );
 
-    // Open print preview for all selected
-    printB5Vouchers(html);
-
-    // Only create new voucher records for non-vouchered transactions
-    if (newTxs.length > 0) {
-      try {
-        for (const tx of newTxs) {
-          await api.createVoucher({
-            company_id: selectedCompanyId,
-            payee: tx.payee || '',
-            amount: tx.debit_amount || 0,
-            date: tx.date || '',
-            description: tx.description || '',
-            category: tx.category || '',
-            payment_method: 'Transfer',
-            status: 'approved',
-            transaction_ids: [tx.id],
-          });
-        }
-        setSaveStatus({ type: 'success', message: `${newTxs.length} voucher(s) created.${alreadyVouchered.length ? ` ${alreadyVouchered.length} reprinted.` : ''}` });
-        clearSelection();
-        await loadTransactions(selectedStmt);
-        setTimeout(() => setSaveStatus(null), 4000);
-      } catch (err) {
-        setSaveStatus({ type: 'error', message: err.message });
+    // Combine: 2× A5 landscape vouchers stacked on A4 portrait
+    if (printSettings.combine && printSettings.pageSize === 'A5') {
+      const pairs = [];
+      for (let i = 0; i < items.length; i += 2) {
+        const pair = items.slice(i, i + 2);
+        // Remove individual page-break and shadow from inner A5 vouchers
+        const cleanPair = pair.map(v => v.replace(/page-break-after:\s*always;?/g, '')
+          .replace(/box-shadow:[^;"]+;?/g, '')
+          .replace(/margin:[^;"]+;?/g, 'margin:0;'));
+        pairs.push(`<div style="
+          width:210mm;height:297mm;padding:0;box-sizing:border-box;
+          display:flex;flex-direction:column;background:#fff;
+          margin:0 auto 16px;box-shadow:0 1px 4px rgba(0,0,0,0.08);
+          page-break-after:always;
+        ">${cleanPair.join('')}</div>`);
       }
-    } else {
-      // All selected are reprints — just show preview, no DB writes
-      setSaveStatus({ type: 'info', message: `Reprinting ${alreadyVouchered.length} existing voucher(s).` });
-      setTimeout(() => setSaveStatus(null), 4000);
+      return pairs.join('');
+    }
+
+    return items.join('');
+  }
+
+  // Step 2: Print/PDF selected (no DB write)
+  function handlePrintSelected() {
+    const txs = sorted.filter(tx => selected.has(tx.id) && tx.debit_amount > 0);
+    if (!txs.length) return;
+    const effectiveSettings = printSettings.combine && printSettings.pageSize === 'A5'
+      ? { pageSize: 'A4', orientation: 'portrait', combine: true }
+      : printSettings;
+    printB5Vouchers(buildVoucherHTML(txs), effectiveSettings);
+  }
+
+  async function handleSavePdfSelected() {
+    const txs = sorted.filter(tx => selected.has(tx.id) && tx.debit_amount > 0);
+    if (!txs.length) return;
+    const effectiveSettings = printSettings.combine && printSettings.pageSize === 'A5'
+      ? { pageSize: 'A4', orientation: 'portrait', combine: true }
+      : printSettings;
+    await downloadB5PDF(buildVoucherHTML(txs), effectiveSettings);
+  }
+
+  // Find & Replace logic
+  const findMatches = useMemo(() => {
+    if (!findText.trim()) return [];
+    const lower = findText.toLowerCase();
+    return sorted.filter(tx => tx.payee?.toLowerCase().includes(lower));
+  }, [sorted, findText]);
+
+  async function handleReplaceAll() {
+    if (!findText.trim() || !findMatches.length) return;
+    const updates = findMatches.map(tx => ({
+      id: tx.id,
+      payee: replaceText,
+    }));
+    try {
+      await api.updateTransactions(updates);
+      setSaveStatus({ type: 'success', message: `${findMatches.length} payee(s) replaced.` });
+      setFindText('');
+      setReplaceText('');
+      await loadTransactions(selectedStmt);
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch (err) {
+      setSaveStatus({ type: 'error', message: err.message });
     }
   }
 
@@ -431,7 +499,7 @@ export default function Transactions() {
 
         {/* Selection toolbar */}
         {selectedStmt && filtered.length > 0 && (
-          <div className="mt-3 pt-3 border-t border-zinc-100 flex items-center gap-3">
+          <div className="mt-3 pt-3 border-t border-zinc-100 flex items-center gap-3 flex-wrap">
             <button
               className="btn-ghost text-xs flex items-center gap-1.5"
               onClick={selectAllDebit}
@@ -440,23 +508,38 @@ export default function Transactions() {
               Select All Debit
             </button>
             {selected.size > 0 && (() => {
-                const selVouchered = sorted.filter(tx => selected.has(tx.id) && tx.is_vouchered).length;
-                const selNew = selected.size - selVouchered;
-                const label = selNew > 0 && selVouchered > 0
-                  ? `Generate (${selNew}) + Reprint (${selVouchered})`
-                  : selNew > 0
-                  ? `Generate Vouchers (${selNew})`
-                  : `Reprint (${selVouchered})`;
+                const selVouchered = sorted.filter(tx => selected.has(tx.id) && tx.is_vouchered && tx.debit_amount > 0).length;
+                const selNew = sorted.filter(tx => selected.has(tx.id) && !tx.is_vouchered && tx.debit_amount > 0).length;
                 return (
               <>
                 <span className="text-xs text-zinc-500">{selected.size} selected</span>
-                <button
-                  className="btn-primary text-xs flex items-center gap-1.5"
-                  onClick={handleGenerateVouchers}
-                >
-                  <FileText className="w-3.5 h-3.5" strokeWidth={1.5} />
-                  {label}
-                </button>
+                {/* Step 1: Convert new ones */}
+                {selNew > 0 && (
+                  <button
+                    className="btn-primary text-xs flex items-center gap-1.5"
+                    onClick={handleConvertToVouchers}
+                  >
+                    <FileText className="w-3.5 h-3.5" strokeWidth={1.5} />
+                    Convert to Vouchers ({selNew})
+                  </button>
+                )}
+                {/* Step 2: Print/PDF for all selected (after convert or reprint) */}
+                {(selNew === 0 || selVouchered > 0) && (
+                  <>
+                    <button
+                      className="btn-secondary text-xs flex items-center gap-1.5"
+                      onClick={handlePrintSelected}
+                    >
+                      <Printer className="w-3.5 h-3.5" strokeWidth={1.5} /> Print ({selVouchered || selected.size})
+                    </button>
+                    <button
+                      className="btn-secondary text-xs flex items-center gap-1.5"
+                      onClick={handleSavePdfSelected}
+                    >
+                      <Download className="w-3.5 h-3.5" strokeWidth={1.5} /> Save PDF ({selVouchered || selected.size})
+                    </button>
+                  </>
+                )}
                 <button className="btn-ghost text-xs" onClick={clearSelection}>
                   Clear
                 </button>
@@ -466,6 +549,89 @@ export default function Transactions() {
           </div>
         )}
       </div>
+
+      {/* Find & Replace + Print Settings */}
+      {selectedStmt && (
+        <div className="card mb-6">
+          <div className="flex items-center gap-6">
+            <button
+              className="flex items-center gap-2 text-sm text-zinc-600 hover:text-zinc-900"
+              onClick={() => setShowFindReplace(!showFindReplace)}
+            >
+              <Replace className="w-4 h-4" strokeWidth={1.5} />
+              Find & Replace
+            </button>
+            <div className="flex items-center gap-4 text-sm">
+              <span className="text-zinc-400">Print:</span>
+              <select
+                className="input py-1 px-2 text-xs w-20"
+                value={printSettings.pageSize}
+                onChange={e => setPrintSettings(s => ({ ...s, pageSize: e.target.value, combine: e.target.value === 'A4' ? false : s.combine }))}
+              >
+                <option value="A5">A5</option>
+                <option value="A4">A4</option>
+              </select>
+              <select
+                className="input py-1 px-2 text-xs w-24"
+                value={printSettings.orientation}
+                onChange={e => setPrintSettings(s => ({ ...s, orientation: e.target.value }))}
+              >
+                <option value="landscape">Landscape</option>
+                <option value="portrait">Portrait</option>
+              </select>
+              {printSettings.pageSize === 'A5' && (
+                <label className="flex items-center gap-1.5 text-xs text-zinc-600 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="rounded border-zinc-300"
+                    checked={printSettings.combine}
+                    onChange={e => setPrintSettings(s => ({ ...s, combine: e.target.checked }))}
+                  />
+                  2× on A4
+                </label>
+              )}
+            </div>
+          </div>
+          {showFindReplace && (
+            <div className="mt-3 pt-3 border-t border-zinc-100">
+              <div className="flex items-end gap-3">
+                <div className="flex-1">
+                  <label className="label">Find in TO column</label>
+                  <input
+                    className="input"
+                    placeholder="Search payee name..."
+                    value={findText}
+                    onChange={e => setFindText(e.target.value)}
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="label">Replace with</label>
+                  <input
+                    className="input"
+                    placeholder="Full name..."
+                    value={replaceText}
+                    onChange={e => setReplaceText(e.target.value)}
+                  />
+                </div>
+                <button
+                  className="btn-primary"
+                  disabled={!findText.trim() || !findMatches.length}
+                  onClick={handleReplaceAll}
+                >
+                  Replace All ({findMatches.length})
+                </button>
+              </div>
+              {findText.trim() && (
+                <p className="mt-2 text-xs text-zinc-500">
+                  {findMatches.length > 0
+                    ? `${findMatches.length} match(es) found — will replace all with "${replaceText || '(empty)'}"`
+                    : 'No matches found'}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Transactions Sheet */}
       {!selectedStmt ? (

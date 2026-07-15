@@ -146,15 +146,26 @@ export function generateVoucherHTML(voucher, company, template) {
   `;
 }
 
-// Minimal A5 landscape payment voucher — clean, no voucher number, no signatures
-export function generateB5VoucherHTML({ payee, date, description, amount, paymentMethod, company }) {
+// Dynamic voucher template — supports A4/A5, portrait/landscape
+export function generateB5VoucherHTML({ payee, date, description, amount, paymentMethod, company, pageSize = 'A5', orientation = 'landscape', combine = false }) {
   const safe = (v) => v || '';
+
+  // Calculate dimensions
+  const isA4 = pageSize === 'A4';
+  const isPortrait = orientation === 'portrait';
+  const w = isA4 ? (isPortrait ? '210mm' : '297mm') : (isPortrait ? '148.5mm' : '210mm');
+  const h = isA4 ? (isPortrait ? '297mm' : '210mm') : (isPortrait ? '210mm' : '148.5mm');
+  const pd = isA4 ? '16mm' : '12mm';
+  const fontSize = isA4 ? '22px' : '20px';
+  const titleSize = isA4 ? '20px' : '18px';
+  const bodySize = isA4 ? '15px' : '14px';
+  const tableSize = isA4 ? '14px' : '13px';
 
   return `
     <div style="
       font-family: 'Inter', system-ui, -apple-system, sans-serif;
-      width: 210mm; height: 148.5mm;
-      padding: 12mm 16mm;
+      width: ${w}; height: ${h};
+      padding: ${pd};
       box-sizing: border-box;
       page-break-after: always;
       background: #fff;
@@ -163,16 +174,16 @@ export function generateB5VoucherHTML({ payee, date, description, amount, paymen
     ">
       <!-- Company Header -->
       <div style="text-align: center; margin-bottom: 14mm;">
-        <div style="font-size: 20px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 3px;">
+        <div style="font-size: ${fontSize}; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 3px;">
           ${safe(company?.name)}
         </div>
-        ${company?.tax_id ? `<div style="font-size: 13px; color: #555;">${safe(company.tax_id)}</div>` : ''}
+        ${company?.tax_id ? `<div style="font-size: ${isA4 ? '14px' : '13px'}; color: #555;">${safe(company.tax_id)}</div>` : ''}
       </div>
 
       <!-- Title -->
       <div style="
         text-align: center;
-        font-size: 18px; font-weight: 700;
+        font-size: ${titleSize}; font-weight: 700;
         letter-spacing: 4px;
         padding: 10px 0;
         border-top: 2px solid #222;
@@ -181,7 +192,7 @@ export function generateB5VoucherHTML({ payee, date, description, amount, paymen
       ">PAYMENT VOUCHER</div>
 
       <!-- Pay To & Date -->
-      <div style="margin-bottom: 12mm; font-size: 14px; line-height: 2;">
+      <div style="margin-bottom: 12mm; font-size: ${bodySize}; line-height: 2;">
         <div>
           <span style="font-weight: 600;">Pay To : </span>
           <span>${safe(payee)}</span>
@@ -193,7 +204,7 @@ export function generateB5VoucherHTML({ payee, date, description, amount, paymen
       </div>
 
       <!-- Table -->
-      <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+      <table style="width: 100%; border-collapse: collapse; font-size: ${tableSize};">
         <thead>
           <tr style="background: #f5f5f5;">
             <th style="padding: 10px 12px; text-align: left; border: 1px solid #ccc; width: 40%;">Particulars</th>
@@ -227,6 +238,13 @@ function formatDateLong(dateStr) {
   });
 }
 
+// Minimalist SVG icons for vanilla JS buttons (lucide-compatible, monochrome zinc)
+const svgPrinter = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0"><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 9V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6"/><rect x="6" y="14" width="12" height="8" rx="1"/></svg>';
+const svgFileDown = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M12 18v-6"/><path d="m9 15 3 3 3-3"/></svg>';
+const svgX = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+const svgSpinner = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;animation:spin 1s linear infinite"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>';
+const iconWrap = (svg, text) => `<span style="display:inline-flex;align-items:center;gap:6px">${svg}${text}</span>`;
+
 // Open B5 landscape print preview overlay
 export function printB5Vouchers(vouchersHtml) {
   // Remove existing overlay if any
@@ -252,30 +270,30 @@ export function printB5Vouchers(vouchersHtml) {
     + 'box-shadow:0 -2px 8px rgba(0,0,0,0.08);';
 
   const printBtn = document.createElement('button');
-  printBtn.textContent = '🖨 Print';
+  printBtn.innerHTML = iconWrap(svgPrinter, 'Print');
   printBtn.style.cssText = 'padding:10px 28px;font-size:14px;cursor:pointer;'
     + 'background:#18181b;color:#fff;border:none;border-radius:8px;font-weight:500;';
   printBtn.onclick = () => window.print();
 
   const pdfBtn = document.createElement('button');
-  pdfBtn.textContent = '📄 Save as PDF';
+  pdfBtn.innerHTML = iconWrap(svgFileDown, 'Save as PDF');
   pdfBtn.style.cssText = 'padding:10px 28px;font-size:14px;cursor:pointer;'
     + 'background:#18181b;color:#fff;border:none;border-radius:8px;font-weight:500;';
   pdfBtn.onclick = async () => {
-    pdfBtn.textContent = '⏳ Generating...';
+    pdfBtn.innerHTML = iconWrap(svgSpinner, 'Generating...');
     pdfBtn.style.opacity = '0.7';
     pdfBtn.disabled = true;
     try {
       await saveAsPDF();
     } finally {
-      pdfBtn.textContent = '📄 Save as PDF';
+      pdfBtn.innerHTML = iconWrap(svgFileDown, 'Save as PDF');
       pdfBtn.style.opacity = '1';
       pdfBtn.disabled = false;
     }
   };
 
   const closeBtn = document.createElement('button');
-  closeBtn.textContent = '✕ Close';
+  closeBtn.innerHTML = iconWrap(svgX, 'Close');
   closeBtn.style.cssText = 'padding:10px 28px;font-size:14px;cursor:pointer;'
     + 'background:#fff;color:#555;border:1px solid #ccc;border-radius:8px;';
   closeBtn.onclick = () => overlay.remove();
@@ -337,31 +355,28 @@ export function printB5Vouchers(vouchersHtml) {
   observer.observe(document.body, { childList: true });
 }
 
-// Generate PDF from voucher pages using html2canvas + jsPDF
-async function saveAsPDF() {
-  const pages = document.querySelectorAll('#voucher-print-overlay > div:first-child > div');
-  if (!pages.length) return;
+// Direct PDF download from voucher HTML (no overlay needed)
+export async function downloadB5PDF(vouchersHtml) {
+  // Create temp container
+  const container = document.createElement('div');
+  container.style.cssText = 'position:fixed;left:-9999px;top:0;width:210mm;';
+  container.innerHTML = vouchersHtml;
+  document.body.appendChild(container);
 
-  // A5 landscape: 210mm x 148.5mm
-  const pdf = new jsPDF({
-    orientation: 'landscape',
-    unit: 'mm',
-    format: [210, 148.5],
-  });
+  const pages = container.children;
+  const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [210, 148.5] });
 
   for (let i = 0; i < pages.length; i++) {
     if (i > 0) pdf.addPage();
-
     const canvas = await html2canvas(pages[i], {
       scale: 4,
       useCORS: true,
       backgroundColor: '#ffffff',
       logging: false,
     });
-
-    const imgData = canvas.toDataURL('image/png');
-    pdf.addImage(imgData, 'PNG', 0, 0, 210, 148.5);
+    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, 210, 148.5);
   }
 
   pdf.save('payment-vouchers.pdf');
+  container.remove();
 }
