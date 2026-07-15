@@ -154,16 +154,16 @@ export function generateB5VoucherHTML({ payee, date, description, amount, paymen
   const isPortrait = orientation === 'portrait';
   const w = combine ? '100%' : (isA4 ? (isPortrait ? '210mm' : '297mm') : (isPortrait ? '148.5mm' : '210mm'));
   const h = combine ? '50%' : (isA4 ? (isPortrait ? '297mm' : '210mm') : (isPortrait ? '210mm' : '148.5mm'));
-  const pd = combine ? '16mm' : (isA4 ? '16mm' : '12mm');
-  const fontSize = combine ? '24px' : (isA4 ? '22px' : '20px');
-  const titleSize = combine ? '22px' : (isA4 ? '20px' : '18px');
+  const pd = combine ? '20mm 24mm' : (isA4 ? '16mm' : '12mm');
+  const fontSize = combine ? '26px' : (isA4 ? '22px' : '20px');
+  const titleSize = combine ? '24px' : (isA4 ? '20px' : '18px');
   const bodySize = combine ? '16px' : (isA4 ? '15px' : '14px');
   const tableSize = combine ? '15px' : (isA4 ? '14px' : '13px');
 
-  const mbHeader = combine ? '8mm' : '14mm';
-  const mbTitle = combine ? '8mm' : '14mm';
-  const mbInfo = combine ? '8mm' : '12mm';
-  const tablePadding = combine ? '14px 16px' : '10px 12px';
+  const mbHeader = combine ? '14mm' : '14mm';
+  const mbTitle = combine ? '14mm' : '14mm';
+  const mbInfo = combine ? '12mm' : '12mm';
+  const tablePadding = combine ? '16px 20px' : '10px 12px';
 
   return `
     <div style="
@@ -321,10 +321,15 @@ export function printB5Vouchers(vouchersHtml, settings = {}) {
   const style = document.createElement('style');
   style.id = 'voucher-print-style';
   style.textContent = `
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
     @media print {
       @page {
         size: ${pageW} ${pageH} ${orientation};
         margin: 0;
+      }
+      body {
+        font-family: 'Inter', system-ui, -apple-system, sans-serif !important;
       }
       body > :not(#voucher-print-overlay) {
         display: none !important;
