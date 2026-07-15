@@ -10,7 +10,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "pages:dev": "wrangler pages dev --local",
-    "deploy": "vite build",
+    "deploy": "vite build && wrangler pages deploy",
+    "deploy:prod": "vite build && wrangler pages deploy --branch=main",
     "db:migrate": "wrangler d1 migrations apply payvault-db",
     "db:seed": "wrangler d1 execute payvault-db --file=./migrations/seed.sql"
   },
