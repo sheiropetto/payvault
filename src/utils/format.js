@@ -167,10 +167,10 @@ export function generateB5VoucherHTML({ payee, date, description, amount, paymen
       width: ${w}; height: ${h};
       padding: ${pd};
       box-sizing: border-box;
-      page-break-after: always;
+      ${combine ? '' : 'page-break-after: always;'}
       background: #fff;
-      margin: 0 auto 16px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      ${combine ? '' : 'margin: 0 auto 16px;'}
+      ${combine ? '' : 'box-shadow: 0 1px 4px rgba(0,0,0,0.08);'}
     ">
       <!-- Company Header -->
       <div style="text-align: center; margin-bottom: 14mm;">

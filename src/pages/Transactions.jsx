@@ -312,6 +312,7 @@ export default function Transactions() {
 
   // Build voucher HTML respecting settings (including combine)
   function buildVoucherHTML(txs) {
+    const isCombined = printSettings.combine && printSettings.pageSize === 'A5';
     const items = txs.map(tx =>
       generateB5VoucherHTML({
         payee: tx.payee || '',
@@ -321,24 +322,21 @@ export default function Transactions() {
         paymentMethod: 'Transfer',
         company: selectedCompany || {},
         ...printSettings,
+        combine: isCombined,
       })
     );
 
     // Combine: 2× A5 landscape vouchers stacked on A4 portrait
-    if (printSettings.combine && printSettings.pageSize === 'A5') {
+    if (isCombined) {
       const pairs = [];
       for (let i = 0; i < items.length; i += 2) {
         const pair = items.slice(i, i + 2);
-        // Remove individual page-break and shadow from inner A5 vouchers
-        const cleanPair = pair.map(v => v.replace(/page-break-after:\s*always;?/g, '')
-          .replace(/box-shadow:[^;"]+;?/g, '')
-          .replace(/margin:[^;"]+;?/g, 'margin:0;'));
         pairs.push(`<div style="
           width:210mm;height:297mm;padding:0;box-sizing:border-box;
           display:flex;flex-direction:column;background:#fff;
           margin:0 auto 16px;box-shadow:0 1px 4px rgba(0,0,0,0.08);
           page-break-after:always;
-        ">${cleanPair.join('')}</div>`);
+        ">${pair.join('')}</div>`);
       }
       return pairs.join('');
     }
