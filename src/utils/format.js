@@ -326,13 +326,13 @@ export function printB5Vouchers(vouchersHtml, settings = {}) {
         size: ${pageW} ${pageH} ${orientation};
         margin: 0;
       }
-      body * { visibility: hidden; }
-      #voucher-print-overlay, #voucher-print-overlay * { visibility: visible; }
+      body > :not(#voucher-print-overlay) {
+        display: none !important;
+      }
       #voucher-print-overlay {
-        position: absolute !important;
-        top: 0 !important; left: 0 !important;
-        width: 100% !important; height: auto !important;
-        overflow: visible !important;
+        position: relative !important;
+        width: 100% !important;
+        height: auto !important;
         background: #fff !important;
       }
       #voucher-print-overlay > div:first-child {
