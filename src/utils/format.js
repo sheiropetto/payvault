@@ -246,10 +246,16 @@ const svgSpinner = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" 
 const iconWrap = (svg, text) => `<span style="display:inline-flex;align-items:center;gap:6px">${svg}${text}</span>`;
 
 // Open B5 landscape print preview overlay
-export function printB5Vouchers(vouchersHtml) {
+export function printB5Vouchers(vouchersHtml, settings = {}) {
   // Remove existing overlay if any
   const existing = document.getElementById('voucher-print-overlay');
   if (existing) existing.remove();
+
+  const isPortrait = settings.orientation === 'portrait';
+  const isA4 = settings.pageSize === 'A4';
+  const pageW = isA4 ? (isPortrait ? '210mm' : '297mm') : (isPortrait ? '148.5mm' : '210mm');
+  const pageH = isA4 ? (isPortrait ? '297mm' : '210mm') : (isPortrait ? '210mm' : '148.5mm');
+  const orientation = isPortrait ? 'portrait' : 'landscape';
 
   // Create overlay container
   const overlay = document.createElement('div');
@@ -259,7 +265,7 @@ export function printB5Vouchers(vouchersHtml) {
 
   // Voucher content wrapper
   const content = document.createElement('div');
-  content.style.cssText = 'max-width:210mm;margin:20px auto;padding-bottom:80px;';
+  content.style.cssText = `max-width:${pageW};margin:20px auto;padding-bottom:80px;`;
   content.innerHTML = vouchersHtml;
 
   // Sticky toolbar
@@ -284,12 +290,12 @@ export function printB5Vouchers(vouchersHtml) {
     pdfBtn.style.opacity = '0.7';
     pdfBtn.disabled = true;
     try {
-      await saveAsPDF();
+      await downloadB5PDF(vouchersHtml, settings);
     } finally {
       pdfBtn.innerHTML = iconWrap(svgFileDown, 'Save as PDF');
       pdfBtn.style.opacity = '1';
       pdfBtn.disabled = false;
-    }
+      }
   };
 
   const closeBtn = document.createElement('button');
@@ -312,7 +318,7 @@ export function printB5Vouchers(vouchersHtml) {
   style.textContent = `
     @media print {
       @page {
-        size: 210mm 148.5mm landscape;
+        size: ${pageW} ${pageH} ${orientation};
         margin: 0;
       }
       body * { visibility: hidden; }
@@ -356,15 +362,21 @@ export function printB5Vouchers(vouchersHtml) {
 }
 
 // Direct PDF download from voucher HTML (no overlay needed)
-export async function downloadB5PDF(vouchersHtml) {
+export async function downloadB5PDF(vouchersHtml, settings = {}) {
+  const isPortrait = settings.orientation === 'portrait';
+  const isA4 = settings.pageSize === 'A4';
+  const w = isA4 ? (isPortrait ? 210 : 297) : (isPortrait ? 148.5 : 210);
+  const h = isA4 ? (isPortrait ? 297 : 210) : (isPortrait ? 210 : 148.5);
+  const orientation = isPortrait ? 'portrait' : 'landscape';
+
   // Create temp container
   const container = document.createElement('div');
-  container.style.cssText = 'position:fixed;left:-9999px;top:0;width:210mm;';
+  container.style.cssText = `position:fixed;left:-9999px;top:0;width:${w}mm;`;
   container.innerHTML = vouchersHtml;
   document.body.appendChild(container);
 
   const pages = container.children;
-  const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [210, 148.5] });
+  const pdf = new jsPDF({ orientation, unit: 'mm', format: [w, h] });
 
   for (let i = 0; i < pages.length; i++) {
     if (i > 0) pdf.addPage();
@@ -374,7 +386,7 @@ export async function downloadB5PDF(vouchersHtml) {
       backgroundColor: '#ffffff',
       logging: false,
     });
-    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, 210, 148.5);
+    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, w, h);
   }
 
   pdf.save('payment-vouchers.pdf');
