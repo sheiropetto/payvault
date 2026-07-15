@@ -333,7 +333,7 @@ export default function Transactions() {
         const pair = items.slice(i, i + 2);
         pairs.push(`<div style="
           width:210mm;height:297mm;padding:0;box-sizing:border-box;
-          display:flex;flex-direction:column;align-items:center;justify-content:center;
+          display:flex;flex-direction:column;align-items:center;
           background:#fff;margin:0 auto 12px;
           box-shadow:0 1px 4px rgba(0,0,0,0.08);page-break-after:always;
         ">${pair.join('')}</div>`);
