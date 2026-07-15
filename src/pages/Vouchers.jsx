@@ -9,6 +9,7 @@ import { useCompany } from '../contexts/CompanyContext';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import EmptyState from '../components/ui/EmptyState';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
+import Select from '../components/ui/Select';
 
 export default function Vouchers() {
   const { selectedCompanyId, selectedCompany } = useCompany();
@@ -350,10 +351,11 @@ function CreateVoucherModal({ companyId, companyName, templates, onClose, onCrea
             </div>
             <div>
               <label className="label">Template</label>
-              <select className="input" value={form.template_id}
-                onChange={e => setForm(f => ({ ...f, template_id: e.target.value }))}>
-                {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
+              <Select
+                value={form.template_id}
+                onChange={val => setForm(f => ({ ...f, template_id: val }))}
+                options={templates.map(t => ({ value: t.id, label: t.name }))}
+              />
             </div>
           </div>
           <div>
@@ -381,13 +383,15 @@ function CreateVoucherModal({ companyId, companyName, templates, onClose, onCrea
             </div>
             <div>
               <label className="label">Category</label>
-              <select className="input" value={form.category}
-                onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
-                <option value="">Select...</option>
-                {['Payment', 'Credit/Deposit', 'Fund Transfer', 'Bank Fee', 'Interest', 'Other'].map(c => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
+              <Select
+                value={form.category}
+                onChange={val => setForm(f => ({ ...f, category: val }))}
+                placeholder="Select..."
+                options={[
+                  { value: '', label: 'Select...' },
+                  ...['Payment', 'Credit/Deposit', 'Fund Transfer', 'Bank Fee', 'Interest', 'Other'].map(c => ({ value: c, label: c }))
+                ]}
+              />
             </div>
           </div>
           <div>
@@ -397,13 +401,15 @@ function CreateVoucherModal({ companyId, companyName, templates, onClose, onCrea
           </div>
           <div>
             <label className="label">Payment Method</label>
-            <select className="input" value={form.payment_method}
-              onChange={e => setForm(f => ({ ...f, payment_method: e.target.value }))}>
-              <option value="">Select...</option>
-              {['Bank Transfer', 'Cheque', 'Cash', 'Online Banking', 'Card'].map(m => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
+            <Select
+              value={form.payment_method}
+              onChange={val => setForm(f => ({ ...f, payment_method: val }))}
+              placeholder="Select..."
+              options={[
+                { value: '', label: 'Select...' },
+                ...['Bank Transfer', 'Cheque', 'Cash', 'Online Banking', 'Card'].map(m => ({ value: m, label: m }))
+              ]}
+            />
           </div>
           <div>
             <label className="label">Notes</label>

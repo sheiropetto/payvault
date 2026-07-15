@@ -2,6 +2,7 @@ import { useUser } from '@clerk/clerk-react';
 import { useState, useEffect } from 'react';
 import { User, Bell, Shield, CreditCard, Users, Plus, Trash2 } from 'lucide-react';
 import { api } from '../utils/api';
+import Select from '../components/ui/Select';
 
 const sections = [
   {
@@ -149,10 +150,14 @@ export default function Settings() {
             </div>
             <div className="w-28">
               <label className="label">Role</label>
-              <select className="input" value={newRole} onChange={e => setNewRole(e.target.value)}>
-                <option value="editor">Editor</option>
-                <option value="viewer">Viewer</option>
-              </select>
+              <Select
+                value={newRole}
+                onChange={setNewRole}
+                options={[
+                  { value: 'editor', label: 'Editor' },
+                  { value: 'viewer', label: 'Viewer' }
+                ]}
+              />
             </div>
             <button type="submit" className="btn-primary" disabled={adding}>
               <Plus className="w-4 h-4" strokeWidth={1.5} />

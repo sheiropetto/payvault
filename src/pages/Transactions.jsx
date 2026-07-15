@@ -10,6 +10,7 @@ import { useFullView } from '../contexts/FullViewContext';
 import { generateB5VoucherHTML, printB5Vouchers } from '../utils/format';
 import EmptyState from '../components/ui/EmptyState';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
+import Select from '../components/ui/Select';
 
 // Editable currency cell with formatted display
 function CurrencyCell({ value, onChange, className }) {
@@ -408,16 +409,12 @@ export default function Transactions() {
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end">
           <div className="w-full sm:w-72">
             <label className="label">Bank Statement</label>
-            <select
-              className="input"
+            <Select
               value={selectedStmt}
-              onChange={(e) => setSelectedStmt(e.target.value)}
-            >
-              <option value="">Select a statement...</option>
-              {statements.map((s) => (
-                <option key={s.id} value={s.id}>{s.filename}</option>
-              ))}
-            </select>
+              onChange={setSelectedStmt}
+              placeholder="Select a statement..."
+              options={statements.map((s) => ({ value: s.id, label: s.filename }))}
+            />
           </div>
           {selectedStmt && (
             <>
@@ -435,28 +432,24 @@ export default function Transactions() {
               </div>
               <div className="w-40">
                 <label className="label">Category</label>
-                <select
-                  className="input"
+                <Select
                   value={filterCategory}
-                  onChange={(e) => setFilterCategory(e.target.value)}
-                >
-                  <option value="">All</option>
-                  {categories.map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
+                  onChange={setFilterCategory}
+                  placeholder="All"
+                  options={[{ value: '', label: 'All' }, ...categories.map((c) => ({ value: c, label: c }))] }
+                />
               </div>
               <div className="w-32">
                 <label className="label">Type</label>
-                <select
-                  className="input"
+                <Select
                   value={filterType}
-                  onChange={(e) => setFilterType(e.target.value)}
-                >
-                  <option value="all">All</option>
-                  <option value="debit">Debit Only</option>
-                  <option value="credit">Credit Only</option>
-                </select>
+                  onChange={setFilterType}
+                  options={[
+                    { value: 'all', label: 'All' },
+                    { value: 'debit', label: 'Debit Only' },
+                    { value: 'credit', label: 'Credit Only' }
+                  ]}
+                />
               </div>
               <div>
                 <button
@@ -548,22 +541,26 @@ export default function Transactions() {
             </button>
             <div className="flex items-center gap-4 text-sm">
               <span className="text-zinc-400">Print:</span>
-              <select
-                className="input py-1 px-2 text-xs w-20"
+              <Select
+                className="w-20"
+                buttonClassName="py-1 px-2 text-xs"
                 value={printSettings.pageSize}
-                onChange={e => setPrintSettings(s => ({ ...s, pageSize: e.target.value, combine: e.target.value === 'A4' ? false : s.combine }))}
-              >
-                <option value="A5">A5</option>
-                <option value="A4">A4</option>
-              </select>
-              <select
-                className="input py-1 px-2 text-xs w-24"
+                onChange={val => setPrintSettings(s => ({ ...s, pageSize: val, combine: val === 'A4' ? false : s.combine }))}
+                options={[
+                  { value: 'A5', label: 'A5' },
+                  { value: 'A4', label: 'A4' }
+                ]}
+              />
+              <Select
+                className="w-24"
+                buttonClassName="py-1 px-2 text-xs"
                 value={printSettings.orientation}
-                onChange={e => setPrintSettings(s => ({ ...s, orientation: e.target.value }))}
-              >
-                <option value="landscape">Landscape</option>
-                <option value="portrait">Portrait</option>
-              </select>
+                onChange={val => setPrintSettings(s => ({ ...s, orientation: val }))}
+                options={[
+                  { value: 'landscape', label: 'Landscape' },
+                  { value: 'portrait', label: 'Portrait' }
+                ]}
+              />
               {printSettings.pageSize === 'A5' && (
                 <label className="flex items-center gap-1.5 text-xs text-zinc-600 cursor-pointer">
                   <input
