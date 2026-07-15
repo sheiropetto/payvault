@@ -5,7 +5,7 @@ import { useFullView } from '../../contexts/FullViewContext';
 export default function Layout() {
   const { fullView, sidebarCollapsed, toggleSidebar } = useFullView();
 
-  // Sidebar collapse auto-expands content to fill freed space
+  // Sidebar collapse → content fills freed space
   const mainMargin = fullView ? 'ml-0' : sidebarCollapsed ? 'ml-16' : 'ml-56';
   const mainPadding = fullView ? 'p-3' : 'p-6 lg:p-8';
 
