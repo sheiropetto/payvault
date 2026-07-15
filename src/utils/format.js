@@ -150,11 +150,10 @@ export function generateVoucherHTML(voucher, company, template) {
 export function generateB5VoucherHTML({ payee, date, description, amount, paymentMethod, company, pageSize = 'A5', orientation = 'landscape', combine = false }) {
   const safe = (v) => v || '';
 
-  // Calculate dimensions
   const isA4 = pageSize === 'A4';
   const isPortrait = orientation === 'portrait';
-  const w = isA4 ? (isPortrait ? '210mm' : '297mm') : (isPortrait ? '148.5mm' : '210mm');
-  const h = isA4 ? (isPortrait ? '297mm' : '210mm') : (isPortrait ? '210mm' : '148.5mm');
+  const w = combine ? '100%' : (isA4 ? (isPortrait ? '210mm' : '297mm') : (isPortrait ? '148.5mm' : '210mm'));
+  const h = combine ? '50%' : (isA4 ? (isPortrait ? '297mm' : '210mm') : (isPortrait ? '210mm' : '148.5mm'));
   const pd = isA4 ? '16mm' : '12mm';
   const fontSize = isA4 ? '22px' : '20px';
   const titleSize = isA4 ? '20px' : '18px';
@@ -171,6 +170,7 @@ export function generateB5VoucherHTML({ payee, date, description, amount, paymen
       background: #fff;
       ${combine ? '' : 'margin: 0 auto 16px;'}
       ${combine ? '' : 'box-shadow: 0 1px 4px rgba(0,0,0,0.08);'}
+      ${combine ? 'border-bottom: 1px dashed #bbb;' : ''}
     ">
       <!-- Company Header -->
       <div style="text-align: center; margin-bottom: 14mm;">
@@ -339,9 +339,12 @@ export function printB5Vouchers(vouchersHtml, settings = {}) {
         padding: 0 !important;
       }
       #voucher-print-overlay > div:first-child > div {
+        width: 100% !important;
+        height: 100vh !important;
         margin: 0 !important;
         box-shadow: none !important;
         page-break-after: always;
+        box-sizing: border-box !important;
       }
       #voucher-print-overlay .no-print {
         display: none !important;
