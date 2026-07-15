@@ -125,7 +125,7 @@ CRITICAL RULES:
 3. Opening/closing balances are NOT transactions — skip them
 4. Return ONLY valid JSON array — no markdown, no explanations, no code blocks`;
 
-    const model = 'gemini-1.5-flash';
+    const model = 'gemini-3.5-flash';
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`;
 
     let contentsParts = [];
