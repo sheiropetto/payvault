@@ -154,11 +154,16 @@ export function generateB5VoucherHTML({ payee, date, description, amount, paymen
   const isPortrait = orientation === 'portrait';
   const w = combine ? '100%' : (isA4 ? (isPortrait ? '210mm' : '297mm') : (isPortrait ? '148.5mm' : '210mm'));
   const h = combine ? '50%' : (isA4 ? (isPortrait ? '297mm' : '210mm') : (isPortrait ? '210mm' : '148.5mm'));
-  const pd = isA4 ? '16mm' : '12mm';
-  const fontSize = isA4 ? '22px' : '20px';
-  const titleSize = isA4 ? '20px' : '18px';
-  const bodySize = isA4 ? '15px' : '14px';
-  const tableSize = isA4 ? '14px' : '13px';
+  const pd = combine ? '16mm' : (isA4 ? '16mm' : '12mm');
+  const fontSize = combine ? '24px' : (isA4 ? '22px' : '20px');
+  const titleSize = combine ? '22px' : (isA4 ? '20px' : '18px');
+  const bodySize = combine ? '16px' : (isA4 ? '15px' : '14px');
+  const tableSize = combine ? '15px' : (isA4 ? '14px' : '13px');
+
+  const mbHeader = combine ? '8mm' : '14mm';
+  const mbTitle = combine ? '8mm' : '14mm';
+  const mbInfo = combine ? '8mm' : '12mm';
+  const tablePadding = combine ? '14px 16px' : '10px 12px';
 
   return `
     <div style="
@@ -173,11 +178,11 @@ export function generateB5VoucherHTML({ payee, date, description, amount, paymen
       ${combine ? 'border-bottom: 1px dashed #bbb;' : ''}
     ">
       <!-- Company Header -->
-      <div style="text-align: center; margin-bottom: 14mm;">
+      <div style="text-align: center; margin-bottom: ${mbHeader};">
         <div style="font-size: ${fontSize}; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 3px;">
           ${safe(company?.name)}
         </div>
-        ${company?.tax_id ? `<div style="font-size: ${isA4 ? '14px' : '13px'}; color: #555;">${safe(company.tax_id)}</div>` : ''}
+        ${company?.tax_id ? `<div style="font-size: ${combine ? '14px' : (isA4 ? '14px' : '13px')}; color: #555;">${safe(company.tax_id)}</div>` : ''}
       </div>
 
       <!-- Title -->
@@ -188,11 +193,11 @@ export function generateB5VoucherHTML({ payee, date, description, amount, paymen
         padding: 10px 0;
         border-top: 2px solid #222;
         border-bottom: 2px solid #222;
-        margin-bottom: 14mm;
+        margin-bottom: ${mbTitle};
       ">PAYMENT VOUCHER</div>
 
       <!-- Pay To & Date -->
-      <div style="margin-bottom: 12mm; font-size: ${bodySize}; line-height: 2;">
+      <div style="margin-bottom: ${mbInfo}; font-size: ${bodySize}; line-height: 2;">
         <div>
           <span style="font-weight: 600;">Pay To : </span>
           <span>${safe(payee)}</span>
@@ -207,16 +212,16 @@ export function generateB5VoucherHTML({ payee, date, description, amount, paymen
       <table style="width: 100%; border-collapse: collapse; font-size: ${tableSize};">
         <thead>
           <tr style="background: #f5f5f5;">
-            <th style="padding: 10px 12px; text-align: left; border: 1px solid #ccc; width: 40%;">Particulars</th>
-            <th style="padding: 10px 12px; text-align: left; border: 1px solid #ccc; width: 30%;">Method Of Payment</th>
-            <th style="padding: 10px 12px; text-align: right; border: 1px solid #ccc; width: 30%;">Amount (RM)</th>
+            <th style="padding: ${tablePadding}; text-align: left; border: 1px solid #ccc; width: 40%;">Particulars</th>
+            <th style="padding: ${tablePadding}; text-align: left; border: 1px solid #ccc; width: 30%;">Method Of Payment</th>
+            <th style="padding: ${tablePadding}; text-align: right; border: 1px solid #ccc; width: 30%;">Amount (RM)</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td style="padding: 12px; border: 1px solid #ccc; vertical-align: top;">${safe(description)}</td>
-            <td style="padding: 12px; border: 1px solid #ccc; vertical-align: top;">${safe(paymentMethod || 'Transfer')}</td>
-            <td style="padding: 12px; border: 1px solid #ccc; text-align: right; font-weight: 600; vertical-align: top;">
+            <td style="padding: ${tablePadding}; border: 1px solid #ccc; vertical-align: top;">${safe(description)}</td>
+            <td style="padding: ${tablePadding}; border: 1px solid #ccc; vertical-align: top;">${safe(paymentMethod || 'Transfer')}</td>
+            <td style="padding: ${tablePadding}; border: 1px solid #ccc; text-align: right; font-weight: 600; vertical-align: top;">
               ${Number(amount || 0).toLocaleString('en-MY', { minimumFractionDigits: 2 })}
             </td>
           </tr>
