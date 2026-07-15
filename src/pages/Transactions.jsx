@@ -134,6 +134,13 @@ export default function Transactions() {
   const [sortField, setSortField] = useState('date');
   const [sortDir, setSortDir] = useState('asc');
 
+  const saveTimeoutRef = useRef(null);
+  const transactionsRef = useRef([]);
+
+  useEffect(() => {
+    transactionsRef.current = transactions;
+  }, [transactions]);
+
   // Find & Replace
   const [showFindReplace, setShowFindReplace] = useState(false);
   const [findText, setFindText] = useState('');
@@ -258,14 +265,70 @@ export default function Transactions() {
     }
   }
 
-  const handleEdit = useCallback((id, field, value) => {
-    setEdits(prev => ({
-      ...prev,
-      [id]: { ...prev[id], [field]: value, _dirty: true },
-    }));
+  const triggerAutoSave = useCallback((updatedEdits) => {
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+
+    saveTimeoutRef.current = setTimeout(async () => {
+      const updates = Object.entries(updatedEdits)
+        .filter(([, v]) => v._dirty)
+        .map(([id, v]) => {
+          const { _dirty, ...fields } = v;
+          return { id, ...fields };
+        });
+
+      if (!updates.length) return;
+
+      setSaving(true);
+      setSaveStatus({ type: 'syncing', message: 'Syncing changes...' });
+      try {
+        await api.updateTransactions(updates);
+        setSaveStatus({ type: 'success', message: 'All changes synced' });
+
+        setEdits(prev => {
+          const next = { ...prev };
+          updates.forEach(up => {
+            if (next[up.id]) {
+              const { _dirty, ...fields } = next[up.id];
+              let matches = true;
+              for (const key of Object.keys(fields)) {
+                if (fields[key] !== up[key]) matches = false;
+              }
+              if (matches) delete next[up.id];
+            }
+          });
+          return next;
+        });
+
+        setTransactions(prev => prev.map(tx => {
+          const up = updates.find(u => u.id === tx.id);
+          if (up) {
+            return { ...tx, ...up, is_edited: 1 };
+          }
+          return tx;
+        }));
+
+        setTimeout(() => setSaveStatus(null), 2000);
+      } catch (err) {
+        setSaveStatus({ type: 'error', message: `Sync failed: ${err.message}` });
+      } finally {
+        setSaving(false);
+      }
+    }, 1000);
   }, []);
 
+  const handleEdit = useCallback((id, field, value) => {
+    setEdits(prev => {
+      const nextEdits = {
+        ...prev,
+        [id]: { ...prev[id], [field]: value, _dirty: true },
+      };
+      triggerAutoSave(nextEdits);
+      return nextEdits;
+    });
+  }, [triggerAutoSave]);
+
   async function handleSave() {
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     const updates = Object.entries(edits)
       .filter(([, v]) => v._dirty)
       .map(([id, v]) => {
@@ -276,10 +339,10 @@ export default function Transactions() {
     if (!updates.length) return;
 
     setSaving(true);
-    setSaveStatus(null);
+    setSaveStatus({ type: 'syncing', message: 'Saving...' });
     try {
       await api.updateTransactions(updates);
-      setSaveStatus({ type: 'success', message: `${updates.length} transactions updated` });
+      setSaveStatus({ type: 'success', message: 'Saved successfully' });
       setEdits({});
       await loadTransactions(selectedStmt);
       setTimeout(() => setSaveStatus(null), 3000);
@@ -318,12 +381,14 @@ export default function Transactions() {
 
     try {
       for (const tx of newTxs) {
+        const edit = edits[tx.id] || {};
+        const particularsVal = edit.particulars ?? tx.particulars ?? 'Payment';
         await api.createVoucher({
           company_id: selectedCompanyId,
           payee: tx.payee || '',
           amount: tx.debit_amount || 0,
           date: tx.date || '',
-          description: tx.description || '',
+          description: particularsVal,
           category: tx.category || '',
           payment_method: 'Transfer',
           status: 'approved',
@@ -342,18 +407,20 @@ export default function Transactions() {
   // Build voucher HTML respecting settings (including combine)
   function buildVoucherHTML(txs) {
     const isCombined = printSettings.combine && printSettings.pageSize === 'A5';
-    const items = txs.map(tx =>
-      generateB5VoucherHTML({
+    const items = txs.map(tx => {
+      const edit = edits[tx.id] || {};
+      const particularsVal = edit.particulars ?? tx.particulars ?? 'Payment';
+      return generateB5VoucherHTML({
         payee: tx.payee || '',
         date: tx.date || '',
-        description: tx.description || '',
+        description: particularsVal,
         amount: tx.debit_amount || 0,
         paymentMethod: 'Transfer',
         company: selectedCompany || {},
         ...printSettings,
         combine: isCombined,
-      })
-    );
+      });
+    });
 
     // Combine: 2× A5 landscape vouchers stacked on A4 portrait
     if (isCombined) {
@@ -672,6 +739,7 @@ export default function Transactions() {
                   {[
                     { key: 'date', label: 'Date', width: 110 },
                     { key: 'description', label: 'Description / Payee', width: 260 },
+                    { key: 'particulars', label: 'Particulars', width: 160 },
                     { key: 'payee', label: 'To', width: 180 },
                     { key: 'category', label: 'Category', width: 130 },
                     { key: 'debit_amount', label: 'Debit (RM)', width: 120, className: 'text-right' },
@@ -843,22 +911,28 @@ export default function Transactions() {
                       <td>
                         <input
                           className="input py-1 px-2 text-sm"
+                          value={edit.particulars ?? tx.particulars ?? 'Payment'}
+                          onChange={(e) => handleEdit(tx.id, 'particulars', e.target.value)}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="input py-1 px-2 text-sm"
                           value={edit.payee ?? tx.payee ?? ''}
                           onChange={(e) => handleEdit(tx.id, 'payee', e.target.value)}
                           placeholder="—"
                         />
                       </td>
                       <td>
-                        <select
-                          className="input py-1 px-2 text-sm"
+                        <Select
+                          buttonClassName="py-1 px-2 text-sm"
                           value={edit.category ?? tx.category ?? ''}
-                          onChange={(e) => handleEdit(tx.id, 'category', e.target.value)}
-                        >
-                          <option value="">Select</option>
-                          {['Payment', 'Credit/Deposit', 'Fund Transfer', 'Bank Fee', 'Interest', 'Other'].map(c => (
-                            <option key={c} value={c}>{c}</option>
-                          ))}
-                        </select>
+                          onChange={(val) => handleEdit(tx.id, 'category', val)}
+                          options={[
+                            { value: '', label: 'Select' },
+                            ...['Payment', 'Credit/Deposit', 'Fund Transfer', 'Bank Fee', 'Interest', 'Other'].map(c => ({ value: c, label: c }))
+                          ]}
+                        />
                       </td>
                       <td className="text-right align-middle">
                         <CurrencyCell

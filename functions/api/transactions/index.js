@@ -31,7 +31,7 @@ export async function onRequest(context) {
         return Response.json({ error: 'updates array required' }, { status: 400 });
       }
 
-      const ALLOWED = ['date', 'description', 'payee', 'category', 'debit_amount', 'credit_amount', 'notes'];
+      const ALLOWED = ['date', 'description', 'payee', 'category', 'debit_amount', 'credit_amount', 'notes', 'particulars'];
       const results = [];
       for (const update of updates) {
         const { id, ...rawFields } = update;
