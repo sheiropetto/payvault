@@ -286,23 +286,6 @@ export function printB5Vouchers(vouchersHtml, settings = {}) {
     + 'background:#18181b;color:#fff;border:none;border-radius:8px;font-weight:500;';
   printBtn.onclick = () => window.print();
 
-  const pdfBtn = document.createElement('button');
-  pdfBtn.innerHTML = iconWrap(svgFileDown, 'Save as PDF');
-  pdfBtn.style.cssText = 'padding:10px 28px;font-size:14px;cursor:pointer;'
-    + 'background:#18181b;color:#fff;border:none;border-radius:8px;font-weight:500;';
-  pdfBtn.onclick = async () => {
-    pdfBtn.innerHTML = iconWrap(svgSpinner, 'Generating...');
-    pdfBtn.style.opacity = '0.7';
-    pdfBtn.disabled = true;
-    try {
-      await downloadB5PDF(vouchersHtml, settings);
-    } finally {
-      pdfBtn.innerHTML = iconWrap(svgFileDown, 'Save as PDF');
-      pdfBtn.style.opacity = '1';
-      pdfBtn.disabled = false;
-      }
-  };
-
   const closeBtn = document.createElement('button');
   closeBtn.innerHTML = iconWrap(svgX, 'Close');
   closeBtn.style.cssText = 'padding:10px 28px;font-size:14px;cursor:pointer;'
@@ -310,7 +293,6 @@ export function printB5Vouchers(vouchersHtml, settings = {}) {
   closeBtn.onclick = () => overlay.remove();
 
   toolbar.appendChild(printBtn);
-  toolbar.appendChild(pdfBtn);
   toolbar.appendChild(closeBtn);
 
   overlay.appendChild(content);

@@ -2,12 +2,12 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Filter, Search, Save, CheckCircle2, AlertCircle,
   ArrowUpDown, ArrowUp, ArrowDown, Maximize2, Minimize2,
-  CheckSquare, Square, FileText, Replace, Printer, Download
+  CheckSquare, Square, FileText, Replace, Printer
 } from 'lucide-react';
 import { api } from '../utils/api';
 import { useCompany } from '../contexts/CompanyContext';
 import { useFullView } from '../contexts/FullViewContext';
-import { generateB5VoucherHTML, printB5Vouchers, downloadB5PDF } from '../utils/format';
+import { generateB5VoucherHTML, printB5Vouchers } from '../utils/format';
 import EmptyState from '../components/ui/EmptyState';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 
@@ -354,14 +354,7 @@ export default function Transactions() {
     printB5Vouchers(buildVoucherHTML(txs), effectiveSettings);
   }
 
-  async function handleSavePdfSelected() {
-    const txs = sorted.filter(tx => selected.has(tx.id) && tx.debit_amount > 0);
-    if (!txs.length) return;
-    const effectiveSettings = printSettings.combine && printSettings.pageSize === 'A5'
-      ? { pageSize: 'A4', orientation: 'portrait', combine: true }
-      : printSettings;
-    await downloadB5PDF(buildVoucherHTML(txs), effectiveSettings);
-  }
+
 
   // Find & Replace logic
   const findMatches = useMemo(() => {
@@ -529,12 +522,6 @@ export default function Transactions() {
                       onClick={handlePrintSelected}
                     >
                       <Printer className="w-3.5 h-3.5" strokeWidth={1.5} /> Print ({selVouchered || selected.size})
-                    </button>
-                    <button
-                      className="btn-secondary text-xs flex items-center gap-1.5"
-                      onClick={handleSavePdfSelected}
-                    >
-                      <Download className="w-3.5 h-3.5" strokeWidth={1.5} /> Save PDF ({selVouchered || selected.size})
                     </button>
                   </>
                 )}
