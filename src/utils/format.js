@@ -307,7 +307,7 @@ export function printB5Vouchers(vouchersHtml, settings = {}) {
 
     @media print {
       @page {
-        size: ${pageW} ${pageH} ${orientation};
+        size: ${settings.pageSize || 'A5'} ${orientation};
         margin: 0;
       }
       body {
