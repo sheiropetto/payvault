@@ -11,6 +11,7 @@ import { useCompany } from '../contexts/CompanyContext';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import EmptyState from '../components/ui/EmptyState';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
+import Select from '../components/ui/Select';
 
 const statusIcons = {
   pending: Clock,
@@ -148,15 +149,13 @@ export default function BankStatements() {
         </div>
         <div className="flex items-center gap-3">
           {allYears.length >= 1 && (
-            <select
-              value={selectedYear}
-              onChange={e => setSelectedYear(e.target.value)}
-              className="text-xs border border-zinc-200 rounded-lg pl-2.5 pr-7 py-1.5 bg-white text-zinc-600 focus:outline-none focus:border-zinc-400 appearance-none bg-[url('data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%2371717a%27 stroke-width=%272%27><path d=%27m6 9 6 6 6-6%27/></svg>')] bg-[length:12px] bg-[right_8px_center] bg-no-repeat"
-            >
-              {allYears.map(y => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
+            <div className="w-20">
+              <Select
+                value={selectedYear}
+                onChange={setSelectedYear}
+                options={allYears.map(y => ({ value: String(y), label: String(y) }))}
+              />
+            </div>
           )}
           <div className="flex border border-zinc-200 rounded-lg overflow-hidden">
             <button
