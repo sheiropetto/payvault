@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   Upload, FileText, Trash2, AlertCircle, CheckCircle2,
-  Clock, RefreshCw, FileSpreadsheet, Building2, XCircle, Zap
+  Clock, RefreshCw, FileSpreadsheet, Building2, XCircle, Zap,
+  Download, Sparkles, Save
 } from 'lucide-react';
 import { api } from '../utils/api';
 import { formatDate } from '../utils/format';
@@ -210,11 +211,11 @@ export default function BankStatements() {
         {extracting && (
           <div className="mt-3 space-y-2">
             <div className="flex items-center justify-between text-xs text-zinc-500">
-              <span>
-                {extractStep === 'download' && '⬇ Downloading PDF...'}
-                {extractStep === 'extract-text' && '📄 Reading PDF text...'}
-                {extractStep === 'ai-call' && `🤖 ${provider === 'gemini' ? 'Gemini' : 'DeepSeek'} is analyzing...`}
-                {extractStep === 'saving' && '💾 Saving transactions...'}
+              <span className="flex items-center gap-1.5">
+                {extractStep === 'download' && <><Download className="w-3 h-3" strokeWidth={1.5} /> Downloading PDF...</>}
+                {extractStep === 'extract-text' && <><FileText className="w-3 h-3" strokeWidth={1.5} /> Reading PDF text...</>}
+                {extractStep === 'ai-call' && <><Sparkles className="w-3 h-3" strokeWidth={1.5} /> {provider === 'gemini' ? 'Gemini' : 'DeepSeek'} is analyzing...</>}
+                {extractStep === 'saving' && <><Save className="w-3 h-3" strokeWidth={1.5} /> Saving transactions...</>}
               </span>
               <span>
                 {extractStep === 'download' && '1/4'}
