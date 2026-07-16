@@ -31,7 +31,6 @@ export async function onRequest(context) {
 
       // Validate required fields
       if (!body.company_id) return Response.json({ error: 'company_id is required' }, { status: 400 });
-      if (!body.payee?.trim()) return Response.json({ error: 'payee is required' }, { status: 400 });
       if (!body.amount || Number(body.amount) <= 0) return Response.json({ error: 'amount must be positive' }, { status: 400 });
       if (!body.date) return Response.json({ error: 'date is required' }, { status: 400 });
 
