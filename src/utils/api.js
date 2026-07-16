@@ -62,9 +62,9 @@ export const api = {
     method: 'PATCH', body: JSON.stringify({ updates }),
   }),
 
-  // DeepSeek
-  extractTransactions: (statementId, text = '') => request('/deepseek/extract', {
-    method: 'POST', body: JSON.stringify({ statement_id: statementId, text }),
+  // AI Extraction
+  extractTransactions: (statementId, text = '', provider = 'deepseek') => request('/deepseek/extract', {
+    method: 'POST', body: JSON.stringify({ statement_id: statementId, text, provider }),
   }),
 
   // Vouchers

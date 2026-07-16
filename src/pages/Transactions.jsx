@@ -114,7 +114,6 @@ const sortFields = [
   { key: 'payee', label: 'To' },
   { key: 'debit_amount', label: 'Debit' },
   { key: 'credit_amount', label: 'Credit' },
-  { key: 'balance', label: 'Balance' },
 ];
 
 export default function Transactions() {
@@ -220,7 +219,7 @@ export default function Transactions() {
       if (sortField === 'date') {
         aVal = a.date || '';
         bVal = b.date || '';
-      } else if (sortField === 'debit_amount' || sortField === 'credit_amount' || sortField === 'balance') {
+      } else if (sortField === 'debit_amount' || sortField === 'credit_amount') {
         aVal = Number(a[sortField]) || 0;
         bVal = Number(b[sortField]) || 0;
       } else {
@@ -744,7 +743,6 @@ export default function Transactions() {
                     { key: 'category', label: 'Category', width: 130 },
                     { key: 'debit_amount', label: 'Debit (RM)', width: 120, className: 'text-right' },
                     { key: 'credit_amount', label: 'Credit (RM)', width: 120, className: 'text-right' },
-                    { key: 'balance', label: 'Balance', width: 120, className: 'text-right' },
                   ].map(col => (
                     <ResizableTh
                       key={col.key || 'vouchered'}
@@ -951,9 +949,6 @@ export default function Transactions() {
                           onChange={(v) => handleEdit(tx.id, 'credit_amount', v)}
                           className="text-sm"
                         />
-                      </td>
-                      <td className="text-right text-zinc-600 text-sm align-middle px-3 py-2">
-                        {tx.balance != null ? Number(tx.balance).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
                       </td>
                     </tr>
                   );

@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   Upload, FileText, Trash2, AlertCircle, CheckCircle2,
-  Clock, RefreshCw, FileSpreadsheet, Building2, XCircle
+  Clock, RefreshCw, FileSpreadsheet, Building2, XCircle, Zap
 } from 'lucide-react';
+import { useUser } from '@clerk/clerk-react';
 import { api } from '../utils/api';
 import { formatDate } from '../utils/format';
 import { extractTextFromPDF } from '../utils/pdfExtract';
@@ -27,13 +28,21 @@ const statusColors = {
 
 export default function BankStatements() {
   const { selectedCompanyId, selectedCompany } = useCompany();
+  const { user } = useUser();
+  const userEmail = user?.primaryEmailAddress?.emailAddress || '';
   const [statements, setStatements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const [extracting, setExtracting] = useState(null);
   const [statusMsg, setStatusMsg] = useState(null);
+  const [provider, setProvider] = useState(() => localStorage.getItem('payvault-extract-provider') || 'deepseek');
+  const [retryStmt, setRetryStmt] = useState(null); // { stmt, failedProvider }
   const fileRef = useRef(null);
+
+  useEffect(() => {
+    localStorage.setItem('payvault-extract-provider', provider);
+  }, [provider]);
 
   useEffect(() => {
     if (selectedCompanyId) loadData();
@@ -70,15 +79,33 @@ export default function BankStatements() {
     }
   }
 
-  async function handleExtract(stmt) {
+  async function handleExtract(stmt, overrideProvider = null) {
+    const useProvider = overrideProvider || provider;
     setExtracting(stmt.id);
+    setStatusMsg(null);
+    setRetryStmt(null);
     try {
-      await api.extractTransactions(stmt.id);
+      let text = '';
+
+      // For PDFs: download file & extract text client-side (better than server extraction)
+      if (stmt.file_type === 'pdf') {
+        const fileRes = await fetch(`/api/bank-statements/${stmt.id}?download=true`, {
+          headers: { 'X-User-Email': userEmail }
+        });
+        if (!fileRes.ok) throw new Error('Failed to download statement file');
+        const blob = await fileRes.blob();
+        text = await extractTextFromPDF(blob);
+      }
+
+      const result = await api.extractTransactions(stmt.id, text, useProvider);
+      setStatusMsg({ type: 'success', text: `[${result.provider || useProvider}] ${result.message}` });
       await loadData();
+      setTimeout(() => setStatusMsg(null), 5000);
     } catch (err) {
       console.error(err);
-      setStatusMsg({ type: 'error', text: 'Failed to extract: ' + err.message });
-      setTimeout(() => setStatusMsg(null), 5000);
+      const otherProvider = useProvider === 'deepseek' ? 'Gemini' : 'DeepSeek';
+      setStatusMsg({ type: 'error', text: `[${useProvider}] ${err.message}` });
+      setRetryStmt({ stmt, failedProvider: useProvider });
     } finally {
       setExtracting(null);
     }
@@ -102,6 +129,32 @@ export default function BankStatements() {
         <div>
           <h1 className="text-lg font-semibold text-zinc-900">Bank Statements</h1>
           <p className="text-sm text-zinc-500 mt-1">Upload PDF or CSV statements for AI extraction</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-zinc-400">Extract with:</span>
+          <div className="flex border border-zinc-200 rounded-lg overflow-hidden">
+            <button
+              onClick={() => setProvider('deepseek')}
+              className={`px-3 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5 ${
+                provider === 'deepseek'
+                  ? 'bg-zinc-900 text-white'
+                  : 'bg-white text-zinc-600 hover:bg-zinc-50'
+              }`}
+            >
+              <Zap className="w-3 h-3" strokeWidth={1.5} />
+              DeepSeek
+            </button>
+            <button
+              onClick={() => setProvider('gemini')}
+              className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                provider === 'gemini'
+                  ? 'bg-zinc-900 text-white'
+                  : 'bg-white text-zinc-600 hover:bg-zinc-50'
+              }`}
+            >
+              Gemini
+            </button>
+          </div>
         </div>
       </div>
 
@@ -138,10 +191,21 @@ export default function BankStatements() {
             statusMsg.type === 'error' ? 'text-red-600' : 'text-green-600'
           }`}>
             {statusMsg.type === 'error'
-              ? <XCircle className="w-3.5 h-3.5" />
-              : <CheckCircle2 className="w-3.5 h-3.5" />
+              ? <XCircle className="w-3.5 h-3.5 flex-shrink-0" />
+              : <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
             }
-            {statusMsg.text}
+            <span>{statusMsg.text}</span>
+            {statusMsg.type === 'error' && retryStmt && (
+              <button
+                onClick={() => {
+                  const other = retryStmt.failedProvider === 'deepseek' ? 'gemini' : 'deepseek';
+                  handleExtract(retryStmt.stmt, other);
+                }}
+                className="ml-2 underline hover:no-underline font-medium"
+              >
+                Retry with {retryStmt.failedProvider === 'deepseek' ? 'Gemini' : 'DeepSeek'}
+              </button>
+            )}
           </div>
         )}
       </div>
