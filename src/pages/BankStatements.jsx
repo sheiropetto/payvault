@@ -37,7 +37,17 @@ export default function BankStatements() {
   const [statusMsg, setStatusMsg] = useState(null);
   const [provider, setProvider] = useState(() => localStorage.getItem('payvault-extract-provider') || 'deepseek');
   const [retryStmt, setRetryStmt] = useState(null); // { stmt, failedProvider }
+  const [selectedYear, setSelectedYear] = useState('latest');
   const fileRef = useRef(null);
+
+  const allYears = [...new Set(statements.map(s => s.year).filter(Boolean))].sort((a, b) => b - a);
+  const latestYear = allYears[0];
+  const effectiveYear = selectedYear === 'latest' ? latestYear : Number(selectedYear);
+
+  const filteredStatements = statements.filter(s => {
+    if (!effectiveYear) return true;
+    return s.year === effectiveYear;
+  });
 
   useEffect(() => {
     localStorage.setItem('payvault-extract-provider', provider);
@@ -126,9 +136,26 @@ export default function BankStatements() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-lg font-semibold text-zinc-900">Bank Statements</h1>
-          <p className="text-sm text-zinc-500 mt-1">Upload PDF or CSV statements for AI extraction</p>
+        <div className="flex items-center gap-4">
+          <div>
+            <h1 className="text-lg font-semibold text-zinc-900">Bank Statements</h1>
+            <p className="text-sm text-zinc-500 mt-1">Upload PDF or CSV statements for AI extraction</p>
+          </div>
+          {allYears.length > 1 && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-zinc-400">Year:</span>
+              <select
+                value={selectedYear}
+                onChange={e => setSelectedYear(e.target.value)}
+                className="text-xs border border-zinc-200 rounded-lg px-2.5 py-1.5 bg-white text-zinc-600 focus:outline-none focus:border-zinc-400"
+              >
+                <option value="latest">Latest ({latestYear})</option>
+                {allYears.map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-zinc-400">Extract with:</span>
@@ -239,10 +266,10 @@ export default function BankStatements() {
       </div>
 
       {/* Statements List */}
-      {statements.length === 0 ? (
+      {filteredStatements.length === 0 ? (
         <EmptyState
           icon={FileText}
-          title="No statements yet"
+          title={effectiveYear ? `No statements for ${effectiveYear}` : 'No statements yet'}
           description="Upload a bank statement to get started with AI-powered transaction extraction."
         />
       ) : (
@@ -260,7 +287,7 @@ export default function BankStatements() {
                 </tr>
               </thead>
               <tbody>
-                {statements.map((stmt) => {
+                {filteredStatements.map((stmt) => {
                   const StatusIcon = statusIcons[stmt.status];
                   return (
                     <tr key={stmt.id}>

@@ -132,6 +132,15 @@ export default function Transactions() {
   const [selected, setSelected] = useState(new Set());
   const [sortField, setSortField] = useState('date');
   const [sortDir, setSortDir] = useState('asc');
+  const [txYear, setTxYear] = useState('latest');
+
+  const allTxYears = [...new Set(statements.map(s => s.year).filter(Boolean))].sort((a, b) => b - a);
+  const latestTxYear = allTxYears[0];
+  const effectiveTxYear = txYear === 'latest' ? latestTxYear : Number(txYear);
+
+  const filteredStmts = effectiveTxYear
+    ? statements.filter(s => !s.year || s.year === effectiveTxYear)
+    : statements;
 
   const saveTimeoutRef = useRef(null);
   const transactionsRef = useRef([]);
@@ -513,9 +522,23 @@ export default function Transactions() {
               value={selectedStmt}
               onChange={setSelectedStmt}
               placeholder="Select a statement..."
-              options={statements.map((s) => ({ value: s.id, label: s.filename }))}
+              options={filteredStmts.map((s) => ({ value: s.id, label: s.filename }))}
             />
           </div>
+          {allTxYears.length > 1 && (
+            <div className="w-32">
+              <label className="label">Year</label>
+              <Select
+                value={txYear}
+                onChange={setTxYear}
+                placeholder="All"
+                options={[
+                  { value: 'latest', label: `Latest (${latestTxYear})` },
+                  ...allTxYears.map(y => ({ value: String(y), label: String(y) }))
+                ]}
+              />
+            </div>
+          )}
           {selectedStmt && (
             <>
               <div className="flex-1 w-full">

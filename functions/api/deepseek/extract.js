@@ -226,10 +226,13 @@ export async function onRequest(context) {
       }
     }
 
-    // Update statement status to done
+    // Update statement status and auto-detect year/month from first transaction
+    const firstDate = transactions[0]?.date || '';
+    const detectedYear = firstDate.slice(0, 4) || null;
+    const detectedMonth = firstDate.slice(5, 7) || null;
     await env.DB.prepare(
-      "UPDATE bank_statements SET status = 'done' WHERE id = ?"
-    ).bind(statement_id).run();
+      "UPDATE bank_statements SET status = 'done', year = ?, month = ? WHERE id = ?"
+    ).bind(detectedYear, detectedMonth, statement_id).run();
 
     return Response.json({
       success: true,
