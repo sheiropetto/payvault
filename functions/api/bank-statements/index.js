@@ -27,6 +27,15 @@ export async function onRequest(context) {
     }
 
     if (request.method === 'POST') {
+      // Check if this is a bulk auto-rename request
+      const contentType = request.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const body = await request.json();
+        if (body.action === 'auto-rename') {
+          return handleAutoRename(env, body.company_id);
+        }
+      }
+
       const formData = await request.formData();
       const file = formData.get('file');
       const companyId = formData.get('company_id');
@@ -55,4 +64,42 @@ export async function onRequest(context) {
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 });
   }
+}
+
+// ─── Helpers ───
+
+const MONTHS = ['January','February','March','April','May','June',
+                'July','August','September','October','November','December'];
+
+export function toProperFilename(filename, month, year, fileType) {
+  const ext = fileType || (filename.endsWith('.csv') ? 'csv' : 'pdf');
+  if (month && year) {
+    return `${MONTHS[month - 1]} ${year}.${ext}`;
+  }
+  if (year) {
+    return `Statement ${year}.${ext}`;
+  }
+  return filename; // keep original if no data
+}
+
+async function handleAutoRename(env, companyId) {
+  let query = 'SELECT id, filename, file_type, month, year FROM bank_statements WHERE month IS NOT NULL AND year IS NOT NULL';
+  const params = [];
+  if (companyId) {
+    query += ' AND company_id = ?';
+    params.push(companyId);
+  }
+  const { results } = await env.DB.prepare(query).bind(...params).all();
+
+  let renamed = 0;
+  for (const stmt of results) {
+    const proper = toProperFilename(stmt.filename, stmt.month, stmt.year, stmt.file_type);
+    if (proper !== stmt.filename) {
+      await env.DB.prepare('UPDATE bank_statements SET filename = ? WHERE id = ?')
+        .bind(proper, stmt.id).run();
+      renamed++;
+    }
+  }
+
+  return Response.json({ success: true, renamed, total: results.length });
 }

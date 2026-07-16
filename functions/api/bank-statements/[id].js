@@ -38,6 +38,22 @@ export async function onRequest(context) {
       return Response.json(stmt);
     }
 
+    if (request.method === 'PATCH') {
+      const { filename } = await request.json();
+      if (!filename || typeof filename !== 'string') {
+        return Response.json({ error: 'filename required' }, { status: 400 });
+      }
+
+      const stmt = await env.DB.prepare('SELECT * FROM bank_statements WHERE id = ?').bind(id).first();
+      if (!stmt) return new Response('Not found', { status: 404 });
+
+      await env.DB.prepare(
+        'UPDATE bank_statements SET filename = ? WHERE id = ?'
+      ).bind(filename.trim(), id).run();
+
+      return Response.json({ success: true, filename: filename.trim() });
+    }
+
     if (request.method === 'DELETE') {
       const stmt = await env.DB.prepare('SELECT * FROM bank_statements WHERE id = ?').bind(id).first();
       if (!stmt) return new Response('Not found', { status: 404 });

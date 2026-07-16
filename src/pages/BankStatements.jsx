@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Upload, FileText, Trash2, AlertCircle, CheckCircle2,
   Clock, RefreshCw, FileSpreadsheet, Building2, XCircle, Zap,
-  Download, Sparkles, Save
+  Download, Sparkles, Save, Pencil
 } from 'lucide-react';
 import { api } from '../utils/api';
 import { formatDate } from '../utils/format';
@@ -39,7 +39,11 @@ export default function BankStatements() {
   const [provider, setProvider] = useState(() => localStorage.getItem('payvault-extract-provider') || 'deepseek');
   const [retryStmt, setRetryStmt] = useState(null); // { stmt, failedProvider }
   const [selectedYear, setSelectedYear] = useState('');
+  const [editingId, setEditingId] = useState(null);   // inline rename
+  const [editValue, setEditValue] = useState('');
+  const [renamingAll, setRenamingAll] = useState(false);
   const fileRef = useRef(null);
+  const editRef = useRef(null);
 
   const allYears = [...new Set(statements.map(s => s.year).filter(Boolean))].sort((a, b) => b - a);
 
@@ -138,6 +142,51 @@ export default function BankStatements() {
     }
   }
 
+  function startEditing(stmt) {
+    setEditingId(stmt.id);
+    setEditValue(stmt.filename);
+    setTimeout(() => editRef.current?.focus(), 50);
+  }
+
+  async function handleRename(id) {
+    const trimmed = editValue.trim();
+    if (!trimmed || trimmed === statements.find(s => s.id === id)?.filename) {
+      setEditingId(null);
+      return;
+    }
+    try {
+      await api.renameStatement(id, trimmed);
+      await loadData();
+    } catch (err) {
+      console.error(err);
+    }
+    setEditingId(null);
+  }
+
+  async function handleAutoRenameAll() {
+    setRenamingAll(true);
+    try {
+      const result = await api.autoRenameStatements(selectedCompanyId);
+      setStatusMsg({ type: 'success', text: `Renamed ${result.renamed} of ${result.total} statements.` });
+      await loadData();
+      setTimeout(() => setStatusMsg(null), 5000);
+    } catch (err) {
+      setStatusMsg({ type: 'error', text: 'Rename failed: ' + err.message });
+    } finally {
+      setRenamingAll(false);
+    }
+  }
+
+  // Check if any statements could benefit from auto-rename
+  const renameableCount = statements.filter(s => s.month && s.year).length;
+  const hasRawNames = statements.some(s => {
+    if (!s.month || !s.year) return false;
+    const months = ['January','February','March','April','May','June',
+                    'July','August','September','October','November','December'];
+    const expected = `${months[s.month - 1]} ${s.year}`;
+    return !s.filename.startsWith(expected);
+  });
+
   if (loading) return <LoadingSpinner />;
 
   return (
@@ -180,6 +229,17 @@ export default function BankStatements() {
               Gemini
             </button>
           </div>
+          {hasRawNames && (
+            <button
+              onClick={handleAutoRenameAll}
+              disabled={renamingAll}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-zinc-300 rounded-lg
+                         text-zinc-600 hover:text-zinc-900 hover:border-zinc-400 transition-colors disabled:opacity-50"
+            >
+              <Pencil className="w-3 h-3" strokeWidth={1.5} />
+              {renamingAll ? 'Renaming…' : `Rename ${renameableCount} files`}
+            </button>
+          )}
         </div>
       </div>
 
@@ -292,10 +352,30 @@ export default function BankStatements() {
                       <td className="font-medium text-zinc-900">
                         <div className="flex items-center gap-2">
                           {stmt.file_type === 'pdf'
-                            ? <FileText className="w-4 h-4 text-red-500" strokeWidth={1.5} />
-                            : <FileSpreadsheet className="w-4 h-4 text-green-600" strokeWidth={1.5} />
+                            ? <FileText className="w-4 h-4 text-red-500 flex-shrink-0" strokeWidth={1.5} />
+                            : <FileSpreadsheet className="w-4 h-4 text-green-600 flex-shrink-0" strokeWidth={1.5} />
                           }
-                          <span className="truncate max-w-[450px]" title={stmt.filename}>{stmt.filename}</span>
+                          {editingId === stmt.id ? (
+                            <input
+                              ref={editRef}
+                              value={editValue}
+                              onChange={e => setEditValue(e.target.value)}
+                              onBlur={() => handleRename(stmt.id)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') handleRename(stmt.id);
+                                if (e.key === 'Escape') setEditingId(null);
+                              }}
+                              className="w-full max-w-[400px] px-2 py-0.5 text-sm border border-zinc-300 rounded focus:outline-none focus:border-zinc-900"
+                            />
+                          ) : (
+                            <span
+                              className="truncate max-w-[400px] cursor-pointer hover:text-zinc-500 transition-colors"
+                              title={stmt.filename + ' — click to rename'}
+                              onClick={() => startEditing(stmt)}
+                            >
+                              {stmt.filename}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="text-zinc-600">{stmt.company_name}</td>

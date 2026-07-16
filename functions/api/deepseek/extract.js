@@ -1,4 +1,5 @@
 import { authenticate } from '../../utils/auth';
+import { toProperFilename } from '../bank-statements/index';
 
 const SYSTEM_PROMPT = `Act as an expert data extraction engine specializing in financial documents. You are parsing text from Malaysian bank statements into structured JSON.
 
@@ -226,13 +227,14 @@ export async function onRequest(context) {
       }
     }
 
-    // Update statement status and auto-detect year/month from first transaction
+    // Update statement status, auto-detect year/month, and auto-rename filename
     const firstDate = transactions[0]?.date || '';
     const detectedYear = firstDate.slice(0, 4) || null;
     const detectedMonth = firstDate.slice(5, 7) || null;
+    const properName = toProperFilename(stmt.filename, detectedMonth ? parseInt(detectedMonth) : null, detectedYear ? parseInt(detectedYear) : null, stmt.file_type);
     await env.DB.prepare(
-      "UPDATE bank_statements SET status = 'done', year = ?, month = ? WHERE id = ?"
-    ).bind(detectedYear, detectedMonth, statement_id).run();
+      "UPDATE bank_statements SET status = 'done', year = ?, month = ?, filename = ? WHERE id = ?"
+    ).bind(detectedYear, detectedMonth, properName, statement_id).run();
 
     return Response.json({
       success: true,
