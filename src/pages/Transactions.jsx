@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Filter, Search, Save, CheckCircle2, AlertCircle,
   ArrowUpDown, ArrowUp, ArrowDown, Maximize2, Minimize2,
-  CheckSquare, Square, FileText, Replace, Printer, Check
+  CheckSquare, Square, FileText, Replace, Printer, Check, Download
 } from 'lucide-react';
 import { api } from '../utils/api';
 import { useCompany } from '../contexts/CompanyContext';
@@ -119,10 +120,12 @@ const sortFields = [
 export default function Transactions() {
   const { selectedCompanyId, selectedCompany } = useCompany();
   const { fullView, setFullView } = useFullView();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [statements, setStatements] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedStmt, setSelectedStmt] = useState('');
+  const [selectedStmt, setSelectedStmt] = useState(() => searchParams.get('statement_id') || '');
   const [search, setSearch] = useState('');
   const [edits, setEdits] = useState({});
   const [saving, setSaving] = useState(false);
@@ -491,6 +494,34 @@ export default function Transactions() {
     }
   }
 
+  function handleExportCSV() {
+    const rows = sorted.length ? sorted : transactions;
+    if (!rows.length) return;
+
+    const headers = ['Date', 'Description', 'Particulars', 'Payee', 'Category', 'Debit (RM)', 'Credit (RM)', 'Voucher No.'];
+    const csvRows = [headers.join(',')];
+    for (const tx of rows) {
+      csvRows.push([
+        `"${(tx.date || '').slice(0, 10)}"`,
+        `"${(tx.description || '').replace(/"/g, '""')}"`,
+        `"${(tx.particulars || '').replace(/"/g, '""')}"`,
+        `"${(tx.payee || '').replace(/"/g, '""')}"`,
+        `"${tx.category || ''}"`,
+        tx.debit_amount || 0,
+        tx.credit_amount || 0,
+        `"${tx.voucher_number || ''}"`,
+      ].join(','));
+    }
+
+    const blob = new Blob(['\uFEFF' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `transactions-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   if (loading && !transactions.length) return <LoadingSpinner />;
 
   return (
@@ -506,11 +537,21 @@ export default function Transactions() {
           <h1 className="text-lg font-semibold text-zinc-900">Transactions</h1>
           <p className="text-sm text-zinc-500 mt-1">Review and edit extracted transactions</p>
         </div>
-        <button
-          onClick={() => setFullView(!fullView)}
-          className="btn-secondary flex items-center gap-2"
-          title={fullView ? 'Exit full view' : 'Full view'}
-        >
+        <div className="flex items-center gap-2">
+          {selectedStmt && sorted.length > 0 && (
+            <button
+              onClick={handleExportCSV}
+              className="btn-secondary flex items-center gap-2"
+              title="Export to CSV"
+            >
+              <Download className="w-4 h-4" strokeWidth={1.5} /> Export CSV
+            </button>
+          )}
+          <button
+            onClick={() => setFullView(!fullView)}
+            className="btn-secondary flex items-center gap-2"
+            title={fullView ? 'Exit full view' : 'Full view'}
+          >
           {fullView ? (
             <><Minimize2 className="w-4 h-4" strokeWidth={1.5} /> Exit Full View</>
           ) : (
@@ -767,6 +808,7 @@ export default function Transactions() {
                     { key: 'particulars', label: 'Particulars', width: 160 },
                     { key: 'payee', label: 'To', width: 180 },
                     { key: 'category', label: 'Category', width: 130 },
+                    { key: 'voucher', label: 'Voucher', width: 130, className: 'text-center' },
                     { key: 'debit_amount', label: 'Debit (RM)', width: 120, className: 'text-right' },
                     { key: 'credit_amount', label: 'Credit (RM)', width: 120, className: 'text-right' },
                   ].map(col => (
@@ -791,25 +833,26 @@ export default function Transactions() {
                         </span>
 
                         {/* Column Filter Popover */}
-                        {['payee', 'category', 'vouchered'].includes(col.key || (col.label === 'Vouchered' ? 'vouchered' : '')) && (
+                        {['payee', 'category', 'vouchered', 'voucher'].includes(col.key || (col.label === 'Vouchered' ? 'vouchered' : '')) && (() => {
+                          const filterKey = col.key === 'voucher' ? 'vouchered' : (col.key || 'vouchered');
+                          return (
                           <div className="relative">
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                const type = col.key || 'vouchered';
-                                setActiveFilterPopover(activeFilterPopover === type ? null : type);
-                                if (type === 'payee') setPayeeFilterSearch('');
+                                setActiveFilterPopover(activeFilterPopover === filterKey ? null : filterKey);
+                                if (filterKey === 'payee') setPayeeFilterSearch('');
                               }}
-                              className={`p-0.5 rounded hover:bg-zinc-200 transition-colors ${columnFilters[col.key || 'vouchered'] ? 'bg-zinc-100' : ''}`}
+                              className={`p-0.5 rounded hover:bg-zinc-200 transition-colors ${columnFilters[filterKey] ? 'bg-zinc-100' : ''}`}
                               title="Filter column"
                             >
                               <Filter
-                                className={`w-3.5 h-3.5 ${columnFilters[col.key || 'vouchered'] ? 'text-zinc-950 fill-zinc-900 font-bold' : 'text-zinc-400 hover:text-zinc-600'}`}
+                                className={`w-3.5 h-3.5 ${columnFilters[filterKey] ? 'text-zinc-950 fill-zinc-900 font-bold' : 'text-zinc-400 hover:text-zinc-600'}`}
                                 strokeWidth={2}
                               />
                             </button>
 
-                            {activeFilterPopover === (col.key || 'vouchered') && (
+                            {activeFilterPopover === filterKey && (
                               <div className="absolute top-full right-0 mt-1.5 p-2 bg-white border border-zinc-200 rounded-lg shadow-lg z-30 min-w-48 text-left font-normal normal-case text-xs text-zinc-700">
                                 {col.key === 'payee' && (
                                   <input
@@ -825,13 +868,13 @@ export default function Transactions() {
                                 <div className="max-h-48 overflow-y-auto space-y-0.5">
                                   <button
                                     onClick={() => {
-                                      setColumnFilters(prev => ({ ...prev, [col.key || 'vouchered']: '' }));
+                                      setColumnFilters(prev => ({ ...prev, [filterKey]: '' }));
                                       setActiveFilterPopover(null);
                                     }}
                                     className="w-full text-left px-2 py-1.5 rounded hover:bg-zinc-50 flex items-center justify-between"
                                   >
                                     <span className="font-medium text-zinc-500">All / Clear</span>
-                                    {!columnFilters[col.key || 'vouchered'] && <Check className="w-3 h-3 text-zinc-900" strokeWidth={2} />}
+                                    {!columnFilters[filterKey] && <Check className="w-3 h-3 text-zinc-900" strokeWidth={2} />}
                                   </button>
 
                                   {col.key === 'category' && uniqueCategories.map(c => (
@@ -866,7 +909,7 @@ export default function Transactions() {
                                     ))
                                   }
 
-                                  {col.label === 'Vouchered' && (
+                                  {(col.label === 'Vouchered' || col.label === 'Voucher') && (
                                     <>
                                       <button
                                         onClick={() => {
@@ -894,7 +937,8 @@ export default function Transactions() {
                               </div>
                             )}
                           </div>
-                        )}
+                          );
+                          })()}
                       </div>
                     </ResizableTh>
                   ))}
@@ -961,6 +1005,19 @@ export default function Transactions() {
                             ...['Payment', 'Credit/Deposit', 'Fund Transfer', 'Bank Fee', 'Interest', 'Other'].map(c => ({ value: c, label: c }))
                           ]}
                         />
+                      </td>
+                      <td className="text-center align-middle">
+                        {tx.voucher_number ? (
+                          <button
+                            className="text-xs font-medium text-zinc-600 hover:text-zinc-900 border border-zinc-200 rounded px-2 py-0.5 hover:border-zinc-400 transition-colors"
+                            title={`Voucher ${tx.voucher_number}`}
+                            onClick={() => navigate(`/vouchers`)}
+                          >
+                            {tx.voucher_number}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-zinc-300">—</span>
+                        )}
                       </td>
                       <td className="text-right align-middle">
                         <CurrencyCell

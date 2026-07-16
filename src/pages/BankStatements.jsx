@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Upload, FileText, Trash2, AlertCircle, CheckCircle2,
   Clock, RefreshCw, FileSpreadsheet, Building2, XCircle, Zap,
-  Download, Sparkles, Save, Pencil
+  Download, Sparkles, Save, Pencil, Eye
 } from 'lucide-react';
 import { api } from '../utils/api';
 import { formatDate } from '../utils/format';
@@ -29,6 +30,7 @@ const statusColors = {
 
 export default function BankStatements() {
   const { selectedCompanyId, selectedCompany } = useCompany();
+  const navigate = useNavigate();
   const [statements, setStatements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -391,6 +393,15 @@ export default function BankStatements() {
                       </td>
                       <td className="text-right">
                         <div className="flex items-center justify-end gap-1">
+                          {stmt.status === 'done' && (
+                            <button
+                              className="btn-ghost text-xs px-2 py-1"
+                              title="View transactions"
+                              onClick={() => navigate(`/transactions?statement_id=${stmt.id}`)}
+                            >
+                              <Eye className="w-3.5 h-3.5" strokeWidth={1.5} />
+                            </button>
+                          )}
                           {stmt.status === 'pending' && (
                             <button
                               className="btn-ghost text-xs px-2 py-1"

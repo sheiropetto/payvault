@@ -10,15 +10,21 @@ export async function onRequest(context) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     if (request.method === 'GET') {
-      let query = 'SELECT * FROM transactions';
+      let query = `SELECT t.*,
+                          vt.voucher_id,
+                          pv.voucher_number,
+                          pv.status as voucher_status
+                   FROM transactions t
+                   LEFT JOIN voucher_transactions vt ON vt.transaction_id = t.id
+                   LEFT JOIN payment_vouchers pv ON pv.id = vt.voucher_id`;
       const params = [];
 
       if (statementId) {
-        query += ' WHERE bank_statement_id = ?';
+        query += ' WHERE t.bank_statement_id = ?';
         params.push(statementId);
       }
 
-      query += ' ORDER BY date ASC, rowid ASC';
+      query += ' ORDER BY t.date ASC, t.rowid ASC';
 
       const { results } = await env.DB.prepare(query).bind(...params).all();
       return Response.json(results);
