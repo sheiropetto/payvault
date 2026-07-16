@@ -3,7 +3,6 @@ import {
   Upload, FileText, Trash2, AlertCircle, CheckCircle2,
   Clock, RefreshCw, FileSpreadsheet, Building2, XCircle, Zap
 } from 'lucide-react';
-import { useUser } from '@clerk/clerk-react';
 import { api } from '../utils/api';
 import { formatDate } from '../utils/format';
 import { extractTextFromPDF } from '../utils/pdfExtract';
@@ -28,8 +27,6 @@ const statusColors = {
 
 export default function BankStatements() {
   const { selectedCompanyId, selectedCompany } = useCompany();
-  const { user } = useUser();
-  const userEmail = user?.primaryEmailAddress?.emailAddress || '';
   const [statements, setStatements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -87,13 +84,9 @@ export default function BankStatements() {
     try {
       let text = '';
 
-      // For PDFs: download file & extract text client-side (better than server extraction)
+      // For PDFs: extract text client-side using pdfjs (better than server extraction)
       if (stmt.file_type === 'pdf') {
-        const fileRes = await fetch(`/api/bank-statements/${stmt.id}?download=true`, {
-          headers: { 'X-User-Email': userEmail }
-        });
-        if (!fileRes.ok) throw new Error('Failed to download statement file');
-        const blob = await fileRes.blob();
+        const blob = await api.downloadStatement(stmt.id);
         text = await extractTextFromPDF(blob);
       }
 

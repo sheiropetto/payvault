@@ -55,6 +55,13 @@ export const api = {
     return res.json();
   },
   deleteStatement: (id) => request(`/bank-statements/${id}`, { method: 'DELETE' }),
+  downloadStatement: async (id) => {
+    const headers = {};
+    if (_userEmail) headers['X-User-Email'] = _userEmail;
+    const res = await fetch(`${BASE}/bank-statements/${id}?download=true`, { headers });
+    if (!res.ok) throw new Error('Failed to download statement file');
+    return res.blob();
+  },
 
   // Transactions
   getTransactions: (statementId) => request(`/transactions?statement_id=${statementId}`),
