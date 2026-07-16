@@ -32,6 +32,7 @@ export default function BankStatements() {
   const [uploading, setUploading] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const [extracting, setExtracting] = useState(null);
+  const [extractStep, setExtractStep] = useState(''); // 'download' | 'extract-text' | 'ai-call' | 'saving'
   const [statusMsg, setStatusMsg] = useState(null);
   const [provider, setProvider] = useState(() => localStorage.getItem('payvault-extract-provider') || 'deepseek');
   const [retryStmt, setRetryStmt] = useState(null); // { stmt, failedProvider }
@@ -79,6 +80,7 @@ export default function BankStatements() {
   async function handleExtract(stmt, overrideProvider = null) {
     const useProvider = overrideProvider || provider;
     setExtracting(stmt.id);
+    setExtractStep('download');
     setStatusMsg(null);
     setRetryStmt(null);
     try {
@@ -87,10 +89,13 @@ export default function BankStatements() {
       // For PDFs: extract text client-side using pdfjs (better than server extraction)
       if (stmt.file_type === 'pdf') {
         const blob = await api.downloadStatement(stmt.id);
+        setExtractStep('extract-text');
         text = await extractTextFromPDF(blob);
       }
 
+      setExtractStep('ai-call');
       const result = await api.extractTransactions(stmt.id, text, useProvider);
+      setExtractStep('saving');
       setStatusMsg({ type: 'success', text: `[${result.provider || useProvider}] ${result.message}` });
       await loadData();
       setTimeout(() => setStatusMsg(null), 5000);
@@ -101,6 +106,7 @@ export default function BankStatements() {
       setRetryStmt({ stmt, failedProvider: useProvider });
     } finally {
       setExtracting(null);
+      setExtractStep('');
     }
   }
 
@@ -201,6 +207,34 @@ export default function BankStatements() {
             )}
           </div>
         )}
+        {extracting && (
+          <div className="mt-3 space-y-2">
+            <div className="flex items-center justify-between text-xs text-zinc-500">
+              <span>
+                {extractStep === 'download' && '⬇ Downloading PDF...'}
+                {extractStep === 'extract-text' && '📄 Reading PDF text...'}
+                {extractStep === 'ai-call' && `🤖 ${provider === 'gemini' ? 'Gemini' : 'DeepSeek'} is analyzing...`}
+                {extractStep === 'saving' && '💾 Saving transactions...'}
+              </span>
+              <span>
+                {extractStep === 'download' && '1/4'}
+                {extractStep === 'extract-text' && '2/4'}
+                {extractStep === 'ai-call' && '3/4'}
+                {extractStep === 'saving' && '4/4'}
+              </span>
+            </div>
+            <div className="w-full bg-zinc-100 rounded-full h-1.5 overflow-hidden">
+              <div
+                className="h-full bg-zinc-900 rounded-full transition-all duration-500 ease-out"
+                style={{
+                  width: extractStep === 'download' ? '25%' :
+                         extractStep === 'extract-text' ? '50%' :
+                         extractStep === 'ai-call' ? '75%' : '100%'
+                }}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Statements List */}
@@ -258,7 +292,13 @@ export default function BankStatements() {
                               disabled={extracting === stmt.id}
                             >
                               {extracting === stmt.id ? (
-                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                <span className="flex items-center gap-1.5">
+                                  <RefreshCw className="w-3 h-3 animate-spin" />
+                                  {extractStep === 'download' && 'Downloading...'}
+                                  {extractStep === 'extract-text' && 'Reading PDF...'}
+                                  {extractStep === 'ai-call' && 'AI extracting...'}
+                                  {extractStep === 'saving' && 'Saving...'}
+                                </span>
                               ) : (
                                 'Extract'
                               )}
