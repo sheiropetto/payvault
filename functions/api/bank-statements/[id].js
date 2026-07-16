@@ -10,8 +10,8 @@ export async function onRequest(context) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     if (request.method === 'GET') {
-      // If requesting file download
-      if (url.searchParams.get('download') === 'true') {
+      // If requesting file download or view
+      if (url.searchParams.get('download') === 'true' || url.searchParams.get('view') === 'true') {
         const stmt = await env.DB.prepare(
           'SELECT * FROM bank_statements WHERE id = ?'
         ).bind(id).first();
@@ -20,9 +20,10 @@ export async function onRequest(context) {
         const fileObj = await env.STORAGE.get(stmt.file_url);
         if (!fileObj) return new Response('File not found', { status: 404 });
 
+        const isView = url.searchParams.get('view') === 'true';
         const headers = new Headers();
         headers.set('Content-Type', 'application/pdf');
-        headers.set('Content-Disposition', `attachment; filename="${stmt.filename}"`);
+        headers.set('Content-Disposition', `${isView ? 'inline' : 'attachment'}; filename="${stmt.filename}"`);
 
         return new Response(fileObj.body, { headers });
       }

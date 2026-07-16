@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Upload, FileText, Building2, DollarSign
@@ -7,11 +7,13 @@ import { api } from '../utils/api';
 import { formatCurrency } from '../utils/format';
 import { useCompany } from '../contexts/CompanyContext';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
+import Select from '../components/ui/Select';
 
 export default function Dashboard() {
   const { selectedCompanyId, selectedCompany } = useCompany();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [year, setYear] = useState('');
 
   useEffect(() => {
     if (selectedCompanyId) loadData();
@@ -31,9 +33,23 @@ export default function Dashboard() {
     }
   }
 
+  const years = useMemo(() => {
+    const ys = new Set();
+    (data?.vouchers || []).forEach(v => {
+      if (v.date) ys.add(v.date.slice(0, 4));
+    });
+    return [...ys].sort((a, b) => b - a);
+  }, [data]);
+
+  const filteredVouchers = useMemo(() => {
+    const vouchers = data?.vouchers || [];
+    if (!year) return vouchers;
+    return vouchers.filter(v => v.date?.startsWith(year));
+  }, [data, year]);
+
   if (loading) return <LoadingSpinner />;
 
-  const totalSpent = (data?.vouchers || [])
+  const totalSpent = filteredVouchers
     .filter(v => v.status !== 'cancelled')
     .reduce((sum, v) => sum + v.amount, 0);
 
@@ -74,9 +90,24 @@ export default function Dashboard() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-lg font-semibold text-zinc-900">Dashboard</h1>
-        <p className="text-sm text-zinc-500 mt-1">Overview of your payment operations</p>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-lg font-semibold text-zinc-900">Dashboard</h1>
+          <p className="text-sm text-zinc-500 mt-1">Overview of your payment operations</p>
+        </div>
+        {years.length > 0 && (
+          <div className="w-24">
+            <Select
+              value={year}
+              onChange={setYear}
+              placeholder="All years"
+              options={[
+                { value: '', label: 'All' },
+                ...years.map(y => ({ value: y, label: y })),
+              ]}
+            />
+          </div>
+        )}
       </div>
 
       {/* Stats Grid */}
@@ -97,10 +128,13 @@ export default function Dashboard() {
       {/* Recent Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="card">
-          <h2 className="text-sm font-semibold text-zinc-900 mb-4">Recent Vouchers</h2>
-          {data?.vouchers?.length ? (
+          <h2 className="text-sm font-semibold text-zinc-900 mb-4">
+            Recent Vouchers
+            {year && <span className="text-zinc-400 font-normal ml-1">· {year}</span>}
+          </h2>
+          {filteredVouchers.length ? (
             <div className="space-y-3">
-              {data.vouchers.slice(0, 5).map((v) => (
+              {filteredVouchers.slice(0, 5).map((v) => (
                 <div key={v.id} className="flex items-center justify-between py-2 border-b border-zinc-100 last:border-0">
                   <div>
                     <p className="text-sm font-medium text-zinc-900">{v.payee}</p>

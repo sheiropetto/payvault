@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Upload, FileText, Trash2, AlertCircle, CheckCircle2,
   Clock, RefreshCw, FileSpreadsheet, Building2, XCircle, Zap,
-  Download, Sparkles, Save, Pencil, Eye
+  Download, Sparkles, Save, Pencil, Eye, CheckSquare, Square
 } from 'lucide-react';
 import { api } from '../utils/api';
 import { formatDate } from '../utils/format';
@@ -44,6 +44,7 @@ export default function BankStatements() {
   const [editingId, setEditingId] = useState(null);   // inline rename
   const [editValue, setEditValue] = useState('');
   const [renamingAll, setRenamingAll] = useState(false);
+  const [selected, setSelected] = useState(new Set());
   const fileRef = useRef(null);
   const editRef = useRef(null);
 
@@ -188,6 +189,46 @@ export default function BankStatements() {
     const expected = `${months[s.month - 1]} ${s.year}`;
     return !s.filename.startsWith(expected);
   });
+
+  function toggleSelect(id) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function selectAll() {
+    if (selected.size === filteredStatements.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(filteredStatements.map(s => s.id)));
+    }
+  }
+
+  async function handleBulkDelete() {
+    setConfirm({
+      title: 'Delete Statements',
+      message: `Delete ${selected.size} statement(s) and all their transactions? This cannot be undone.`,
+      variant: 'danger',
+      confirmLabel: `Delete ${selected.size}`,
+      onConfirm: async () => {
+        try {
+          for (const id of selected) {
+            await api.deleteStatement(id);
+          }
+          setSelected(new Set());
+          await loadData();
+          setConfirm(null);
+          setStatusMsg({ type: 'success', text: `${selected.size} statement(s) deleted.` });
+          setTimeout(() => setStatusMsg(null), 5000);
+        } catch (err) {
+          console.error(err);
+          setStatusMsg({ type: 'error', text: 'Delete failed: ' + err.message });
+        }
+      },
+    });
+  }
 
   if (loading) return <LoadingSpinner />;
 
@@ -334,10 +375,34 @@ export default function BankStatements() {
         />
       ) : (
         <div className="card p-0 overflow-hidden">
+          {/* Selection toolbar */}
+          {selected.size > 0 && (
+            <div className="px-4 py-2 border-b border-zinc-100 bg-zinc-50 flex items-center gap-3">
+              <span className="text-xs text-zinc-500">{selected.size} selected</span>
+              <button
+                className="btn-ghost text-xs text-red-500 hover:text-red-600 flex items-center gap-1.5"
+                onClick={handleBulkDelete}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Delete Selected
+              </button>
+              <button className="btn-ghost text-xs" onClick={() => setSelected(new Set())}>
+                Clear
+              </button>
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="sheet-grid">
               <thead>
                 <tr>
+                  <th className="w-10">
+                    <button onClick={selectAll} className="p-1">
+                      {selected.size === filteredStatements.length && filteredStatements.length > 0
+                        ? <CheckSquare className="w-4 h-4" strokeWidth={1.5} />
+                        : <Square className="w-4 h-4" strokeWidth={1.5} />
+                      }
+                    </button>
+                  </th>
                   <th>Filename</th>
                   <th>Company</th>
                   <th>Type</th>
@@ -350,7 +415,15 @@ export default function BankStatements() {
                 {filteredStatements.map((stmt) => {
                   const StatusIcon = statusIcons[stmt.status];
                   return (
-                    <tr key={stmt.id}>
+                    <tr key={stmt.id} className={selected.has(stmt.id) ? 'bg-zinc-50' : ''}>
+                      <td>
+                        <button onClick={() => toggleSelect(stmt.id)} className="p-1">
+                          {selected.has(stmt.id)
+                            ? <CheckSquare className="w-4 h-4 text-zinc-900" strokeWidth={1.5} />
+                            : <Square className="w-4 h-4 text-zinc-300" strokeWidth={1.5} />
+                          }
+                        </button>
+                      </td>
                       <td className="font-medium text-zinc-900">
                         <div className="flex items-center gap-2">
                           {stmt.file_type === 'pdf'
@@ -393,6 +466,13 @@ export default function BankStatements() {
                       </td>
                       <td className="text-right">
                         <div className="flex items-center justify-end gap-1">
+                          <button
+                            className="btn-ghost text-xs px-2 py-1"
+                            title="View PDF"
+                            onClick={() => window.open(`/api/bank-statements/${stmt.id}?view=true`, '_blank')}
+                          >
+                            <Download className="w-3.5 h-3.5" strokeWidth={1.5} />
+                          </button>
                           {stmt.status === 'done' && (
                             <button
                               className="btn-ghost text-xs px-2 py-1"
