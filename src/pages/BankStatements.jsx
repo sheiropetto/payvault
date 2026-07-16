@@ -57,7 +57,7 @@ export default function BankStatements() {
 
   const filteredStatements = statements.filter(s => {
     if (!effectiveYear) return true;
-    return s.year === effectiveYear;
+    return s.year === effectiveYear || s.year === null;
   });
 
   useEffect(() => {
