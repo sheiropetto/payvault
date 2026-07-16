@@ -141,7 +141,7 @@ export default function BankStatements() {
             <h1 className="text-lg font-semibold text-zinc-900">Bank Statements</h1>
             <p className="text-sm text-zinc-500 mt-1">Upload PDF or CSV statements for AI extraction</p>
           </div>
-          {allYears.length > 1 && (
+          {allYears.length >= 1 && (
             <div className="flex items-center gap-2">
               <span className="text-xs text-zinc-400">Year:</span>
               <select

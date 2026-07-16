@@ -525,7 +525,7 @@ export default function Transactions() {
               options={filteredStmts.map((s) => ({ value: s.id, label: s.filename }))}
             />
           </div>
-          {allTxYears.length > 1 && (
+          {allTxYears.length >= 1 && (
             <div className="w-32">
               <label className="label">Year</label>
               <Select
