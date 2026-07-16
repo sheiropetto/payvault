@@ -132,11 +132,17 @@ export default function Transactions() {
   const [selected, setSelected] = useState(new Set());
   const [sortField, setSortField] = useState('date');
   const [sortDir, setSortDir] = useState('asc');
-  const [txYear, setTxYear] = useState('latest');
+  const [txYear, setTxYear] = useState('');
 
   const allTxYears = [...new Set(statements.map(s => s.year).filter(Boolean))].sort((a, b) => b - a);
-  const latestTxYear = allTxYears[0];
-  const effectiveTxYear = txYear === 'latest' ? latestTxYear : Number(txYear);
+
+  useEffect(() => {
+    if (allTxYears.length > 0 && !txYear) {
+      setTxYear(String(allTxYears[0]));
+    }
+  }, [allTxYears]);
+
+  const effectiveTxYear = txYear ? Number(txYear) : null;
 
   const filteredStmts = effectiveTxYear
     ? statements.filter(s => !s.year || s.year === effectiveTxYear)
@@ -526,16 +532,13 @@ export default function Transactions() {
             />
           </div>
           {allTxYears.length >= 1 && (
-            <div className="w-32">
+            <div className="w-24">
               <label className="label">Year</label>
               <Select
                 value={txYear}
                 onChange={setTxYear}
                 placeholder="All"
-                options={[
-                  { value: 'latest', label: `Latest (${latestTxYear})` },
-                  ...allTxYears.map(y => ({ value: String(y), label: String(y) }))
-                ]}
+                options={allTxYears.map(y => ({ value: String(y), label: String(y) }))}
               />
             </div>
           )}

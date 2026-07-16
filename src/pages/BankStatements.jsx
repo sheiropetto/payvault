@@ -37,12 +37,18 @@ export default function BankStatements() {
   const [statusMsg, setStatusMsg] = useState(null);
   const [provider, setProvider] = useState(() => localStorage.getItem('payvault-extract-provider') || 'deepseek');
   const [retryStmt, setRetryStmt] = useState(null); // { stmt, failedProvider }
-  const [selectedYear, setSelectedYear] = useState('latest');
+  const [selectedYear, setSelectedYear] = useState('');
   const fileRef = useRef(null);
 
   const allYears = [...new Set(statements.map(s => s.year).filter(Boolean))].sort((a, b) => b - a);
-  const latestYear = allYears[0];
-  const effectiveYear = selectedYear === 'latest' ? latestYear : Number(selectedYear);
+
+  useEffect(() => {
+    if (allYears.length > 0 && !selectedYear) {
+      setSelectedYear(String(allYears[0]));
+    }
+  }, [allYears]);
+
+  const effectiveYear = selectedYear ? Number(selectedYear) : null;
 
   const filteredStatements = statements.filter(s => {
     if (!effectiveYear) return true;
@@ -136,29 +142,22 @@ export default function BankStatements() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-4">
-          <div>
-            <h1 className="text-lg font-semibold text-zinc-900">Bank Statements</h1>
-            <p className="text-sm text-zinc-500 mt-1">Upload PDF or CSV statements for AI extraction</p>
-          </div>
-          {allYears.length >= 1 && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-zinc-400">Year:</span>
-              <select
-                value={selectedYear}
-                onChange={e => setSelectedYear(e.target.value)}
-                className="text-xs border border-zinc-200 rounded-lg px-2.5 py-1.5 bg-white text-zinc-600 focus:outline-none focus:border-zinc-400"
-              >
-                <option value="latest">Latest ({latestYear})</option>
-                {allYears.map(y => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
-              </select>
-            </div>
-          )}
+        <div>
+          <h1 className="text-lg font-semibold text-zinc-900">Bank Statements</h1>
+          <p className="text-sm text-zinc-500 mt-1">Upload PDF or CSV statements for AI extraction</p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-zinc-400">Extract with:</span>
+        <div className="flex items-center gap-3">
+          {allYears.length >= 1 && (
+            <select
+              value={selectedYear}
+              onChange={e => setSelectedYear(e.target.value)}
+              className="text-xs border border-zinc-200 rounded-lg px-2.5 py-1.5 bg-white text-zinc-600 focus:outline-none focus:border-zinc-400"
+            >
+              {allYears.map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          )}
           <div className="flex border border-zinc-200 rounded-lg overflow-hidden">
             <button
               onClick={() => setProvider('deepseek')}
