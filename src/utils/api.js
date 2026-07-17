@@ -82,8 +82,8 @@ export const api = {
   }),
 
   // AI Extraction
-  extractTransactions: (statementId, text = '', provider = 'gemini') => request('/deepseek/extract', {
-    method: 'POST', body: JSON.stringify({ statement_id: statementId, text, provider }),
+  extractTransactions: (statementId, text = '') => request('/extract', {
+    method: 'POST', body: JSON.stringify({ statement_id: statementId, text }),
   }),
 
   // Vouchers

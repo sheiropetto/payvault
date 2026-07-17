@@ -38,8 +38,7 @@ export default function BankStatements() {
   const [extracting, setExtracting] = useState(null);
   const [extractStep, setExtractStep] = useState(''); // 'download' | 'extract-text' | 'ai-call' | 'saving'
   const [statusMsg, setStatusMsg] = useState(null);
-  const [provider, setProvider] = useState(() => localStorage.getItem('payvault-extract-provider') || 'gemini');
-  const [retryStmt, setRetryStmt] = useState(null); // { stmt, failedProvider }
+  const [retryStmt, setRetryStmt] = useState(null); // { stmt }
   const [selectedYear, setSelectedYear] = useState('');
   const [editingId, setEditingId] = useState(null);   // inline rename
   const [editValue, setEditValue] = useState('');
@@ -63,9 +62,7 @@ export default function BankStatements() {
     return s.year === effectiveYear || s.year === null;
   });
 
-  useEffect(() => {
-    localStorage.setItem('payvault-extract-provider', provider);
-  }, [provider]);
+
 
   useEffect(() => {
     if (selectedCompanyId) loadData();
@@ -102,8 +99,7 @@ export default function BankStatements() {
     }
   }
 
-  async function handleExtract(stmt, overrideProvider = null) {
-    const useProvider = overrideProvider || provider;
+  async function handleExtract(stmt) {
     setExtracting(stmt.id);
     setExtractStep('download');
     setStatusMsg(null);
@@ -119,16 +115,15 @@ export default function BankStatements() {
       }
 
       setExtractStep('ai-call');
-      const result = await api.extractTransactions(stmt.id, text, useProvider);
+      const result = await api.extractTransactions(stmt.id, text);
       setExtractStep('saving');
-      setStatusMsg({ type: 'success', text: `[${result.provider || useProvider}] ${result.message}` });
+      setStatusMsg({ type: 'success', text: `[Gemini] ${result.message}` });
       await loadData();
       setTimeout(() => setStatusMsg(null), 5000);
     } catch (err) {
       console.error(err);
-      const otherProvider = useProvider === 'deepseek' ? 'Gemini' : 'DeepSeek';
-      setStatusMsg({ type: 'error', text: `[${useProvider}] ${err.message}` });
-      setRetryStmt({ stmt, failedProvider: useProvider });
+      setStatusMsg({ type: 'error', text: `[Gemini] ${err.message}` });
+      setRetryStmt({ stmt });
     } finally {
       setExtracting(null);
       setExtractStep('');
@@ -280,29 +275,7 @@ export default function BankStatements() {
               />
             </div>
           )}
-          <div className="flex border border-zinc-200 rounded-lg overflow-hidden">
-            <button
-              onClick={() => setProvider('deepseek')}
-              className={`px-3 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5 ${
-                provider === 'deepseek'
-                  ? 'bg-zinc-900 text-white'
-                  : 'bg-white text-zinc-600 hover:bg-zinc-50'
-              }`}
-            >
-              <Zap className="w-3 h-3" strokeWidth={1.5} />
-              DeepSeek
-            </button>
-            <button
-              onClick={() => setProvider('gemini')}
-              className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                provider === 'gemini'
-                  ? 'bg-zinc-900 text-white'
-                  : 'bg-white text-zinc-600 hover:bg-zinc-50'
-              }`}
-            >
-              Gemini
-            </button>
-          </div>
+
           {hasRawNames && (
             <button
               onClick={handleAutoRenameAll}
@@ -395,13 +368,10 @@ export default function BankStatements() {
             <span>{statusMsg.text}</span>
             {statusMsg.type === 'error' && retryStmt && (
               <button
-                onClick={() => {
-                  const other = retryStmt.failedProvider === 'deepseek' ? 'gemini' : 'deepseek';
-                  handleExtract(retryStmt.stmt, other);
-                }}
+                onClick={() => handleExtract(retryStmt.stmt)}
                 className="ml-2 underline hover:no-underline font-medium"
               >
-                Retry with {retryStmt.failedProvider === 'deepseek' ? 'Gemini' : 'DeepSeek'}
+                Retry
               </button>
             )}
           </div>
@@ -412,7 +382,7 @@ export default function BankStatements() {
               <span className="flex items-center gap-1.5">
                 {extractStep === 'download' && <><Download className="w-3 h-3" strokeWidth={1.5} /> Downloading PDF...</>}
                 {extractStep === 'extract-text' && <><FileText className="w-3 h-3" strokeWidth={1.5} /> Reading PDF text...</>}
-                {extractStep === 'ai-call' && <><Sparkles className="w-3 h-3" strokeWidth={1.5} /> {provider === 'gemini' ? 'Gemini' : 'DeepSeek'} is analyzing...</>}
+                {extractStep === 'ai-call' && <><Sparkles className="w-3 h-3" strokeWidth={1.5} /> Gemini is analyzing...</>}
                 {extractStep === 'saving' && <><Save className="w-3 h-3" strokeWidth={1.5} /> Saving transactions...</>}
               </span>
               <span>

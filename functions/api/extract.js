@@ -183,43 +183,6 @@ function parseTransactions(content) {
   return null;
 }
 
-// ─── Call DeepSeek API ───
-async function callDeepSeek(apiKey, pdfText) {
-  const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: 'deepseek-chat',
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: `Extract ALL transactions from this bank statement. Return ONLY a JSON array.\n\nRaw text:\n\n${pdfText.slice(0, 80000)}` }
-      ],
-      temperature: 0.0,
-      max_tokens: 16384,
-      response_format: { type: 'json_object' }
-    }),
-    signal: AbortSignal.timeout(120000),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`DeepSeek API error (${res.status}): ${errText.slice(0, 500)}`);
-  }
-
-  const data = await res.json();
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) throw new Error('DeepSeek returned empty response');
-
-  const transactions = parseTransactions(content);
-  if (!transactions || !Array.isArray(transactions) || transactions.length === 0) {
-    throw new Error('DeepSeek returned 0 transactions');
-  }
-
-  return { transactions, provider: 'deepseek', usage: data.usage };
-}
 
 // ─── Call Gemini API (fallback) ───
 async function callGemini(apiKey, pdfText) {
@@ -311,21 +274,12 @@ export async function onRequest(context) {
       }
     }
 
-    // ─── Use the user's chosen provider (no auto-fallback) ───
-    let result;
-    let provider = preferredProvider || 'gemini';
-
-    if (provider === 'gemini') {
-      if (!env.GEMINI_API_KEY) {
-        return Response.json({ error: 'GEMINI_API_KEY not configured' }, { status: 500 });
-      }
-      result = await callGemini(env.GEMINI_API_KEY, pdfText);
-    } else {
-      if (!env.DEEPSEEK_API_KEY) {
-        return Response.json({ error: 'DEEPSEEK_API_KEY not configured' }, { status: 500 });
-      }
-      result = await callDeepSeek(env.DEEPSEEK_API_KEY, pdfText);
+    // ─── Use Gemini API ───
+    if (!env.GEMINI_API_KEY) {
+      return Response.json({ error: 'GEMINI_API_KEY not configured' }, { status: 500 });
     }
+    const result = await callGemini(env.GEMINI_API_KEY, pdfText);
+    const provider = 'gemini';
 
     const { transactions } = result;
 
