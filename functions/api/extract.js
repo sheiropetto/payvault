@@ -1,5 +1,5 @@
-import { authenticate } from '../../utils/auth';
-import { toProperFilename } from '../bank-statements/index';
+import { authenticate } from '../utils/auth';
+import { toProperFilename } from './bank-statements/index';
 
 const SYSTEM_PROMPT = `Act as an expert data extraction engine specializing in financial documents. You are parsing text from Malaysian bank statements into structured JSON.
 
