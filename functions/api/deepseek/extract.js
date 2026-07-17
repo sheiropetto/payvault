@@ -14,7 +14,8 @@ Bank statements group transactions per date. Under each date, there may be MULTI
 2. Within a date group, identify transaction boundaries using these signals:
    - Lines containing a TRANSACTION CODE start a NEW transaction. Transaction codes include:
      "TSFR FUND CR", "TSFR FUND DR", "DUITNOW TRSF DR", "DUITNOW TRSF CR",
-     "GIRO PYMT", "FPX", "DEP-CASH CDT", "IBG TRSF", "ATM CASH"
+     "GIRO PYMT", "FPX", "DEP-CASH CDT", "IBG TRSF", "ATM CASH",
+     "CHEQUE PROCESS FEE", "LEMBAGA HASIL DALAM NEGERI"
    - Lines WITHOUT a transaction code (e.g., account numbers like "3149XXXXX", names like "MAHIRIBU SDN BHD", remarks like "BUDGET" or "PAYMENT") are CONTINUATION lines of the preceding transaction.
 
 3. The amount (e.g., "5,000.00", "30,000.00") at the END of a line belongs to THAT line's transaction.
@@ -44,21 +45,28 @@ Correct output:
   ]
 
 ## TRANSACTION TYPE IDENTIFIERS
-- "TSFR FUND CR" or "DUITNOW TRSF CR" = CREDIT (money IN) → credit_amount
+- "TSFR FUND CR" (including "TSFR FUND CR-ATM/EFT") or "DUITNOW TRSF CR" = CREDIT (money IN) → credit_amount
 - "TSFR FUND DR" or "DUITNOW TRSF DR" or "GIRO PYMT" or "FPX" = DEBIT (money OUT) → debit_amount
 - "DEP-CASH CDT" = Cash deposit CREDIT → credit_amount
-- "KUMPULAN WANG SIMPANAN PEKERJA" (EPF), "PERTUBUHAN KESELAMATAN SOSIAL" (SOCSO) = statutory payments → debit_amount
+- "CHEQUE PROCESS FEE" = Bank fee DEBIT → debit_amount, category: "Bank Fee"
+- "KUMPULAN WANG SIMPANAN PEKERJA" (EPF), "PERTUBUHAN KESELAMATAN SOSIAL" (SOCSO), "LEMBAGA HASIL DALAM NEGERI" (LHDN) = statutory payments → debit_amount
+- "IBG TRSF" without CR/DR → check context: if amount is in debit column → debit; if credit column → credit
 
 ## NUMBER FORMATTING
-Standardize numbers by removing commas. Date format: YYYY-MM-DD (infer year from statement header).
+Standardize numbers by removing commas. Date format: YYYY-MM-DD (infer year from statement header, e.g., "Statement Date 31 May 2023" → year is 2023).
 
 ## AMOUNT RULE
 Each amount belongs to the transaction it is DIRECTLY on the same line with. Never swap amounts between transactions. Never duplicate amounts.
 
-## SKIP
-- Lines with "Balance", "B/F", "C/F", "Opening Balance", "Closing Balance"
-- Lines that are purely account numbers without any transaction code or date
-- Account summary sections at the bottom
+## SKIP THESE — THEY ARE NOT TRANSACTIONS
+- "Balance From Last Statement", "Balance B/F", "Balance C/F", "Closing Balance", "Baki"
+- "TEGASAN / HIGHLIGHTS", "RINGKASAN / SUMMARY", "Jumlah Debit", "Jumlah Kredit"
+- Repeated page headers: bank names (e.g., "PUBLIC BANK"), branch addresses, account holder names, account numbers — these appear on every page
+- "This is a computer generated statement", "No signature is required"
+- "PeeBee Tip" and any illustrated tip boxes
+- Legal disclaimers, privacy policies, anti-corruption notices (usually on last page)
+- "Page X of Y" or page number indicators
+- Lines with only a running balance number and no transaction description
 
 ## OUTPUT FORMAT
 Return a JSON array of objects. Each object MUST have exactly these fields:
@@ -85,8 +93,8 @@ function validateAndCorrect(transactions, rawText) {
     const desc = (tx.description || '').toUpperCase();
 
     // Detect transaction type from description keywords
-    const isDebit = /\b(DR|TRSF\s*DR|DUITNOW\s+TRSF\s+DR|GIRO\s+PYMT|FPX|TSFR\s+FUND\s+DR)\b/.test(desc);
-    const isCredit = /\b(CR|CDT|TRSF\s*CR|DUITNOW\s+TRSF\s+CR|DEP[- ]?CASH)\b/.test(desc);
+    const isDebit = /\b(DR|TRSF\s*DR|DUITNOW\s+TRSF\s+DR|GIRO\s+PYMT|FPX|TSFR\s+FUND\s+DR|CHEQUE\s+PROCESS\s+FEE|LEMBAGA\s+HASIL)\b/i.test(desc);
+    const isCredit = /\b(CR|CDT|TRSF\s*CR|DUITNOW\s+TRSF\s+CR|DEP[- ]?CASH)\b/i.test(desc);
 
     if (!isDebit && !isCredit) continue; // can't determine type, skip
 
@@ -141,10 +149,10 @@ function validateAndCorrect(transactions, rawText) {
 
 function guessCategory(desc) {
   const d = desc.toUpperCase();
+  if (/\b(CHEQUE\s+PROCESS\s+FEE|BANK\s+FEE|SERVICE\s+FEE|CHARGE|COMMISSION)\b/.test(d)) return 'Bank Fee';
   if (/\b(DUITNOW|TRSF|GIRO|FPX|IBG|TRANSFER)\b/.test(d)) return 'Fund Transfer';
-  if (/\b(FEE|CHARGE|COMMISSION)\b/.test(d)) return 'Bank Fee';
   if (/\b(INTEREST|DIVIDEND)\b/.test(d)) return 'Interest';
-  if (/\b(EPF|SOCSO|KWSP|PERKESO|LHDN|HASIL|CUKAI)\b/.test(d)) return 'Payment';
+  if (/\b(EPF|SOCSO|KWSP|PERKESO|LHDN|LEMBAGA\s+HASIL|CUKAI)\b/.test(d)) return 'Payment';
   return 'Payment';
 }
 
