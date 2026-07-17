@@ -21,6 +21,7 @@ export default function Vouchers() {
   const [showCreate, setShowCreate] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const [previewVoucher, setPreviewVoucher] = useState(null);
+  const [deletingAll, setDeletingAll] = useState(false);
   const printRef = useRef(null);
 
   useEffect(() => { if (selectedCompanyId) loadData(); }, [selectedCompanyId]);
@@ -64,6 +65,31 @@ export default function Vouchers() {
     } catch (err) {
       console.error(err);
     }
+  }
+
+  function handleDeleteAll() {
+    const count = vouchers.length;
+    if (!count) return;
+    setConfirm({
+      title: 'Delete All Vouchers',
+      message: `Are you sure you want to delete ALL ${count} payment voucher(s)? This cannot be undone. Transaction data is preserved — only the vouchers are removed.`,
+      variant: 'danger',
+      confirmLabel: `Delete All ${count} Vouchers`,
+      onConfirm: async () => {
+        setDeletingAll(true);
+        try {
+          for (const v of vouchers) {
+            await api.deleteVoucher(v.id);
+          }
+          await loadData();
+          setConfirm(null);
+        } catch (err) {
+          console.error(err);
+        } finally {
+          setDeletingAll(false);
+        }
+      },
+    });
   }
 
   function handlePrint(id) {
@@ -150,6 +176,20 @@ export default function Vouchers() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
+          {vouchers.length > 0 && (
+            <button
+              className="btn-ghost text-xs flex items-center gap-1.5 text-red-500 hover:text-red-600 hover:bg-red-50"
+              onClick={handleDeleteAll}
+              disabled={deletingAll}
+            >
+              {deletingAll ? (
+                <div className="w-3.5 h-3.5 border-2 border-red-300 border-t-red-500 rounded-full animate-spin" />
+              ) : (
+                <Trash2 className="w-3.5 h-3.5" strokeWidth={1.5} />
+              )}
+              {deletingAll ? 'Deleting...' : `Delete All (${vouchers.length})`}
+            </button>
+          )}
           {selected.size > 0 && (
             <div className="flex items-center gap-2">
               <span className="text-xs text-zinc-500">{selected.size} selected</span>
