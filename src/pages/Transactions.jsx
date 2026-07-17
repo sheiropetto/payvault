@@ -1098,7 +1098,7 @@ export default function Transactions() {
           </div>
         </div>
       )}
-      {confirm && <ConfirmModal {...confirm} onClose={() => setConfirm(null)} />}
+      {confirm && <ConfirmModal open={true} {...confirm} onCancel={() => setConfirm(null)} />}
     </div>
   );
 }
