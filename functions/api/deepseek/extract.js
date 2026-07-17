@@ -6,8 +6,27 @@ const SYSTEM_PROMPT = `Act as an expert data extraction engine specializing in f
 Analyze the statement text. Pay extreme attention to the specific patterns of Malaysian banking data:
 1. Date Context: Dates are listed as "DD/MM" (e.g., 03/01, 04/01). Infer the correct year based on the statement header (e.g. 2023).
 2. Multi-line Transactions: A single transaction description often spans multiple lines before the next numerical amount aligns with it. Group and combine them logically.
-3. Local Transaction Type Identifiers: Capture structural terms unique to Malaysia, such as "DUITNOW TRSF DR", "DUITNOW TRSF CR", "GIRO PYMT", "FPX", "TSFR FUND DR-ATM/EFT", and statutory payments like "KUMPULAN WANG SIMPANAN PEKERJA" (EPF) or "PERTUBUHAN KESELAMATAN SOSIAL" (SOCSO).
+3. Local Transaction Type Identifiers:
+   - "DR" or "TRSF DR" or "DUITNOW TRSF DR" = DEBIT (money going OUT). The amount belongs to THIS transaction.
+   - "CR" or "CDT" or "TRSF CR" or "DUITNOW TRSF CR" = CREDIT (money coming IN). The amount belongs to THIS transaction.
+   - "DEP-CASH CDT" = Cash deposit (CREDIT). The amount is money coming IN.
+   - "GIRO PYMT", "FPX", "TSFR FUND DR-ATM/EFT" = DEBIT (money going OUT).
+   - "KUMPULAN WANG SIMPANAN PEKERJA" (EPF), "PERTUBUHAN KESELAMATAN SOSIAL" (SOCSO) = statutory payments.
 4. Number Formatting: Standardize numbers by removing commas.
+
+CRITICAL AMOUNT ASSIGNMENT RULE:
+Each amount belongs to the transaction it is DIRECTLY aligned with or immediately follows. Never swap amounts between transactions. A DR transaction gets its own amount as debit_amount, a CR/CDT transaction gets its own amount as credit_amount. If two transactions appear adjacent with different amounts, each keeps its own amount — do NOT mix them up.
+
+Example of correct extraction:
+Text:
+  11/05 DEP-CASH CDT 1687 0273            5,000.00
+  11/05 DUITNOW TRSF DR 28223 DANION   100,000.00
+
+Correct output:
+  [
+    {"idx":1,"date":"2023-05-11","description":"DEP-CASH CDT 1687 0273","debit_amount":0,"credit_amount":5000.00,"category":"Credit/Deposit","payee":""},
+    {"idx":2,"date":"2023-05-11","description":"DUITNOW TRSF DR 28223 DANION","debit_amount":100000.00,"credit_amount":0,"category":"Fund Transfer","payee":"DANION A/L LEWIS"}
+  ]
 
 To ensure exact chronological order of extraction, follow these strict rules:
 - Sequential Index: Add an incrementing integer "idx" starting from 1 for every single transaction extracted. Extract row-by-row top-to-bottom as printed. Do not sort by date during extraction.
@@ -25,7 +44,8 @@ CRITICAL RULES:
 1. Extract EVERY transaction row — do not summarize or skip
 2. If a row has a date and a description, it's a transaction
 3. Opening/closing balances are NOT transactions — skip them
-4. Return ONLY valid JSON array — no markdown, no explanations, no code blocks`;
+4. Each amount stays with its OWN transaction — never swap amounts between rows
+5. Return ONLY valid JSON array — no markdown, no explanations, no code blocks`;
 
 // ─── Parse AI response (works for both DeepSeek & Gemini) ───
 function parseTransactions(content) {
