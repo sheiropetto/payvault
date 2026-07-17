@@ -154,16 +154,18 @@ export function generateB5VoucherHTML({ payee, date, description, amount, paymen
   const isPortrait = orientation === 'portrait';
   const w = combine ? '100%' : (isA4 ? (isPortrait ? '210mm' : '297mm') : (isPortrait ? '148.5mm' : '210mm'));
   const h = combine ? '50%' : (isA4 ? (isPortrait ? '297mm' : '210mm') : (isPortrait ? '210mm' : '148.5mm'));
-  const pd = combine ? '10mm 16mm' : (isA4 ? '16mm' : '12mm');
-  const fontSize = combine ? '22px' : (isA4 ? '22px' : '20px');
-  const titleSize = combine ? '20px' : (isA4 ? '20px' : '18px');
-  const bodySize = combine ? '14px' : (isA4 ? '15px' : '14px');
-  const tableSize = combine ? '13px' : (isA4 ? '14px' : '13px');
 
-  const mbHeader = combine ? '8mm' : '14mm';
-  const mbTitle = combine ? '8mm' : '14mm';
-  const mbInfo = combine ? '8mm' : '12mm';
-  const tablePadding = combine ? '10px 12px' : '10px 12px';
+  // A5: bumped up font & spacing to fill the page fully
+  const pd = combine ? '8mm 14mm' : (isA4 ? '16mm' : '8mm');
+  const fontSize = combine ? '20px' : (isA4 ? '22px' : '24px');
+  const titleSize = combine ? '18px' : (isA4 ? '20px' : '22px');
+  const bodySize = combine ? '13px' : (isA4 ? '15px' : '16px');
+  const tableSize = combine ? '13px' : (isA4 ? '14px' : '15px');
+
+  const mbHeader = combine ? '6mm' : (isA4 ? '14mm' : '8mm');
+  const mbTitle = combine ? '6mm' : (isA4 ? '14mm' : '8mm');
+  const mbInfo = combine ? '6mm' : (isA4 ? '12mm' : '8mm');
+  const tablePadding = combine ? '8px 10px' : (isA4 ? '10px 12px' : '12px 14px');
 
   return `
     <div style="
@@ -182,7 +184,7 @@ export function generateB5VoucherHTML({ payee, date, description, amount, paymen
         <div style="font-size: ${fontSize}; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 3px;">
           ${safe(company?.name)}
         </div>
-        ${company?.tax_id ? `<div style="font-size: ${combine ? '14px' : (isA4 ? '14px' : '13px')}; color: #555;">${safe(company.tax_id)}</div>` : ''}
+        ${company?.tax_id ? `<div style="font-size: ${combine ? '13px' : (isA4 ? '14px' : '15px')}; color: #555;">${safe(company.tax_id)}</div>` : ''}
       </div>
 
       <!-- Title -->
