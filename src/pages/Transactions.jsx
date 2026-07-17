@@ -130,6 +130,7 @@ export default function Transactions() {
   const [edits, setEdits] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState(null);
+  const [converting, setConverting] = useState(false);
   const [filterCategory, setFilterCategory] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [selected, setSelected] = useState(new Set());
@@ -396,6 +397,7 @@ export default function Transactions() {
     const newTxs = sorted.filter(tx => selected.has(tx.id) && tx.debit_amount > 0 && !tx.is_vouchered);
     if (!newTxs.length) return;
 
+    setConverting(true);
     try {
       for (const tx of newTxs) {
         const edit = edits[tx.id] || {};
@@ -414,10 +416,11 @@ export default function Transactions() {
       }
       setSaveStatus({ type: 'success', message: `${newTxs.length} voucher(s) created.` });
       await loadTransactions(selectedStmt);
-      // Keep selection so user can print immediately
       setTimeout(() => setSaveStatus(null), 4000);
     } catch (err) {
       setSaveStatus({ type: 'error', message: err.message });
+    } finally {
+      setConverting(false);
     }
   }
 
@@ -670,9 +673,14 @@ export default function Transactions() {
                   <button
                     className="btn-primary text-xs flex items-center gap-1.5"
                     onClick={handleConvertToVouchers}
+                    disabled={converting}
                   >
-                    <FileText className="w-3.5 h-3.5" strokeWidth={1.5} />
-                    Convert to Vouchers ({selNew})
+                    {converting ? (
+                      <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <FileText className="w-3.5 h-3.5" strokeWidth={1.5} />
+                    )}
+                    {converting ? `Creating ${selNew}...` : `Convert to Vouchers (${selNew})`}
                   </button>
                 )}
                 {/* Step 2: Print/PDF for all selected (after convert or reprint) */}
