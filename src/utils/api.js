@@ -61,6 +61,9 @@ export const api = {
   autoRenameStatements: (companyId) => request('/bank-statements', {
     method: 'POST', body: JSON.stringify({ action: 'auto-rename', company_id: companyId }),
   }),
+  cleanupPDFs: (companyId) => request('/bank-statements', {
+    method: 'POST', body: JSON.stringify({ action: 'cleanup-pdfs', company_id: companyId }),
+  }),
   downloadStatement: async (id) => {
     const headers = {};
     if (_userEmail) headers['X-User-Email'] = _userEmail;

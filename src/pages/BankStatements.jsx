@@ -190,6 +190,30 @@ export default function BankStatements() {
     return !s.filename.startsWith(expected);
   });
 
+  // Count statements whose PDFs can be cleaned up (extracted + file still in R2)
+  const cleanableCount = statements.filter(s => s.status === 'done' && s.file_url).length;
+
+  async function handleCleanupPDFs() {
+    setConfirm({
+      title: 'Clean Up PDFs',
+      message: `Delete ${cleanableCount} extracted PDF file(s) from storage? The extracted transaction data is kept — only the original PDF file is removed.`,
+      variant: 'danger',
+      confirmLabel: `Delete ${cleanableCount} PDFs`,
+      onConfirm: async () => {
+        try {
+          const result = await api.cleanupPDFs(selectedCompanyId);
+          setStatusMsg({ type: 'success', text: `Cleaned up ${result.deleted} PDF(s).` });
+          await loadData();
+          setConfirm(null);
+          setTimeout(() => setStatusMsg(null), 5000);
+        } catch (err) {
+          setStatusMsg({ type: 'error', text: 'Cleanup failed: ' + err.message });
+          setConfirm(null);
+        }
+      },
+    });
+  }
+
   function toggleSelect(id) {
     setSelected(prev => {
       const next = new Set(prev);
@@ -231,6 +255,13 @@ export default function BankStatements() {
   }
 
   if (loading) return <LoadingSpinner />;
+
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const coveredMonths = new Set();
+  statements.forEach(s => {
+    if (effectiveYear && s.year === effectiveYear && s.month) coveredMonths.add(s.month);
+  });
+  const coveragePct = effectiveYear ? Math.round((coveredMonths.size / 12) * 100) : 0;
 
   return (
     <div>
@@ -283,8 +314,47 @@ export default function BankStatements() {
               {renamingAll ? 'Renaming…' : `Rename ${renameableCount} files`}
             </button>
           )}
+          {cleanableCount > 0 && (
+            <button
+              onClick={handleCleanupPDFs}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-zinc-300 rounded-lg
+                         text-zinc-500 hover:text-red-600 hover:border-red-300 transition-colors"
+            >
+              <Trash2 className="w-3 h-3" strokeWidth={1.5} />
+              Clean up {cleanableCount} PDF{cleanableCount !== 1 ? 's' : ''}
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Month Coverage */}
+      {effectiveYear && (
+        <div className="card mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm font-medium text-zinc-700">{effectiveYear} Coverage</span>
+            <span className="text-xs text-zinc-400">{coveredMonths.size}/12 months · {coveragePct}%</span>
+          </div>
+          <div className="grid grid-cols-12 gap-1.5">
+            {MONTHS.map((m, i) => {
+              const monthNum = i + 1;
+              const has = coveredMonths.has(monthNum);
+              return (
+                <div
+                  key={m}
+                  className={`text-center py-2 rounded-md text-xs font-medium transition-colors ${
+                    has
+                      ? 'bg-zinc-900 text-white'
+                      : 'bg-zinc-100 text-zinc-400'
+                  }`}
+                  title={has ? `${m} ${effectiveYear} — statement uploaded` : `${m} ${effectiveYear} — no statement`}
+                >
+                  {m}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Upload Area */}
       <div className="card mb-6">

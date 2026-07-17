@@ -34,6 +34,9 @@ export async function onRequest(context) {
         if (body.action === 'auto-rename') {
           return handleAutoRename(env, body.company_id);
         }
+        if (body.action === 'cleanup-pdfs') {
+          return handleCleanupPDFs(env, body.company_id);
+        }
       }
 
       const formData = await request.formData();
@@ -102,4 +105,28 @@ async function handleAutoRename(env, companyId) {
   }
 
   return Response.json({ success: true, renamed, total: results.length });
+}
+
+async function handleCleanupPDFs(env, companyId) {
+  let query = 'SELECT id, file_url FROM bank_statements WHERE status = \'done\' AND file_url IS NOT NULL';
+  const params = [];
+  if (companyId) {
+    query += ' AND company_id = ?';
+    params.push(companyId);
+  }
+  const { results } = await env.DB.prepare(query).bind(...params).all();
+
+  let deleted = 0;
+  for (const stmt of results) {
+    try {
+      await env.STORAGE.delete(stmt.file_url);
+      await env.DB.prepare('UPDATE bank_statements SET file_url = NULL WHERE id = ?')
+        .bind(stmt.id).run();
+      deleted++;
+    } catch (err) {
+      console.error(`Failed to delete ${stmt.file_url}:`, err.message);
+    }
+  }
+
+  return Response.json({ success: true, deleted, total: results.length });
 }
