@@ -223,7 +223,7 @@ async function callDeepSeek(apiKey, pdfText) {
 
 // ─── Call Gemini API (fallback) ───
 async function callGemini(apiKey, pdfText) {
-  const model = 'gemini-2.0-flash';
+  const model = 'gemini-3.5-flash';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   const res = await fetch(url, {
