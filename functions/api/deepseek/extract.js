@@ -47,6 +47,79 @@ CRITICAL RULES:
 4. Each amount stays with its OWN transaction — never swap amounts between rows
 5. Return ONLY valid JSON array — no markdown, no explanations, no code blocks`;
 
+// ─── Post-extraction validator: cross-check DR/CR/CDT against amounts ───
+function validateAndCorrect(transactions, rawText) {
+  const corrections = [];
+  // Normalize raw text for amount extraction
+  const lines = rawText.split('\n');
+
+  for (const tx of transactions) {
+    const desc = (tx.description || '').toUpperCase();
+
+    // Detect transaction type from description keywords
+    const isDebit = /\b(DR|TRSF\s*DR|DUITNOW\s+TRSF\s+DR|GIRO\s+PYMT|FPX|TSFR\s+FUND\s+DR)\b/.test(desc);
+    const isCredit = /\b(CR|CDT|TRSF\s*CR|DUITNOW\s+TRSF\s+CR|DEP[- ]?CASH)\b/.test(desc);
+
+    if (!isDebit && !isCredit) continue; // can't determine type, skip
+
+    const hasDebitAmt = (tx.debit_amount || 0) > 0;
+    const hasCreditAmt = (tx.credit_amount || 0) > 0;
+
+    // Correct case: DR → debit, CR/CDT → credit
+    if (isDebit && hasDebitAmt && !hasCreditAmt) continue;
+    if (isCredit && hasCreditAmt && !hasDebitAmt) continue;
+
+    // Mismatch detected — try to find the correct amount from raw text
+    let corrected = false;
+    const totalAmount = (tx.debit_amount || 0) + (tx.credit_amount || 0);
+
+    if (totalAmount > 0) {
+      if (isDebit) {
+        tx.debit_amount = totalAmount;
+        tx.credit_amount = 0;
+        if (tx.category === 'Credit/Deposit') tx.category = guessCategory(desc);
+        corrected = true;
+        corrections.push({ idx: tx.idx, desc: tx.description, fixed: 'swapped to debit', amount: totalAmount });
+      } else if (isCredit) {
+        tx.credit_amount = totalAmount;
+        tx.debit_amount = 0;
+        if (tx.category !== 'Credit/Deposit') tx.category = 'Credit/Deposit';
+        corrected = true;
+        corrections.push({ idx: tx.idx, desc: tx.description, fixed: 'swapped to credit', amount: totalAmount });
+      }
+    }
+
+    // If still wrong (no amount at all), try to find amount from raw text lines
+    if (!corrected && tx.description) {
+      for (const line of lines) {
+        if (line.includes(tx.description.slice(0, 20))) {
+          const amtMatch = line.match(/([\d,]+\.\d{2})\s*$/);
+          if (amtMatch) {
+            const rawAmt = parseFloat(amtMatch[1].replace(/,/g, ''));
+            if (!isNaN(rawAmt) && rawAmt > 0) {
+              if (isDebit) { tx.debit_amount = rawAmt; tx.credit_amount = 0; }
+              else { tx.credit_amount = rawAmt; tx.debit_amount = 0; }
+              corrections.push({ idx: tx.idx, desc: tx.description, fixed: 'from raw text', amount: rawAmt });
+            }
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  return corrections;
+}
+
+function guessCategory(desc) {
+  const d = desc.toUpperCase();
+  if (/\b(DUITNOW|TRSF|GIRO|FPX|IBG|TRANSFER)\b/.test(d)) return 'Fund Transfer';
+  if (/\b(FEE|CHARGE|COMMISSION)\b/.test(d)) return 'Bank Fee';
+  if (/\b(INTEREST|DIVIDEND)\b/.test(d)) return 'Interest';
+  if (/\b(EPF|SOCSO|KWSP|PERKESO|LHDN|HASIL|CUKAI)\b/.test(d)) return 'Payment';
+  return 'Payment';
+}
+
 // ─── Parse AI response (works for both DeepSeek & Gemini) ───
 function parseTransactions(content) {
   try {
@@ -223,6 +296,9 @@ export async function onRequest(context) {
     // Sort by idx
     transactions.sort((a, b) => (a.idx || 0) - (b.idx || 0));
 
+    // ─── Post-extraction validation: cross-check DR/CR/CDT against raw text ───
+    const corrections = validateAndCorrect(transactions, pdfText);
+
     // Insert into DB (no balance column)
     const insertStmt = env.DB.prepare(
       `INSERT INTO transactions (bank_statement_id, date, description, debit_amount, credit_amount, category, payee)
@@ -261,7 +337,11 @@ export async function onRequest(context) {
       provider,
       total_extracted: transactions.length,
       total_inserted: insertedCount,
-      message: `[${provider}] Successfully extracted ${insertedCount} transactions`,
+      corrections: corrections.length,
+      correction_details: corrections,
+      message: corrections.length > 0
+        ? `[${provider}] Extracted ${insertedCount} transactions · Auto-corrected ${corrections.length} amount(s)`
+        : `[${provider}] Successfully extracted ${insertedCount} transactions`,
     });
 
   } catch (err) {
