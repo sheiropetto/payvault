@@ -313,7 +313,7 @@ export async function onRequest(context) {
 
     // ─── Use the user's chosen provider (no auto-fallback) ───
     let result;
-    let provider = preferredProvider || 'deepseek';
+    let provider = preferredProvider || 'gemini';
 
     if (provider === 'gemini') {
       if (!env.GEMINI_API_KEY) {

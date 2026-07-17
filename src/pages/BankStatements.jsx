@@ -38,7 +38,7 @@ export default function BankStatements() {
   const [extracting, setExtracting] = useState(null);
   const [extractStep, setExtractStep] = useState(''); // 'download' | 'extract-text' | 'ai-call' | 'saving'
   const [statusMsg, setStatusMsg] = useState(null);
-  const [provider, setProvider] = useState(() => localStorage.getItem('payvault-extract-provider') || 'deepseek');
+  const [provider, setProvider] = useState(() => localStorage.getItem('payvault-extract-provider') || 'gemini');
   const [retryStmt, setRetryStmt] = useState(null); // { stmt, failedProvider }
   const [selectedYear, setSelectedYear] = useState('');
   const [editingId, setEditingId] = useState(null);   // inline rename
