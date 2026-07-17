@@ -3,49 +3,77 @@ import { toProperFilename } from '../bank-statements/index';
 
 const SYSTEM_PROMPT = `Act as an expert data extraction engine specializing in financial documents. You are parsing text from Malaysian bank statements into structured JSON.
 
-Analyze the statement text. Pay extreme attention to the specific patterns of Malaysian banking data:
-1. Date Context: Dates are listed as "DD/MM" (e.g., 03/01, 04/01). Infer the correct year based on the statement header (e.g. 2023).
-2. Multi-line Transactions: A single transaction description often spans multiple lines before the next numerical amount aligns with it. Group and combine them logically.
-3. Local Transaction Type Identifiers:
-   - "DR" or "TRSF DR" or "DUITNOW TRSF DR" = DEBIT (money going OUT). The amount belongs to THIS transaction.
-   - "CR" or "CDT" or "TRSF CR" or "DUITNOW TRSF CR" = CREDIT (money coming IN). The amount belongs to THIS transaction.
-   - "DEP-CASH CDT" = Cash deposit (CREDIT). The amount is money coming IN.
-   - "GIRO PYMT", "FPX", "TSFR FUND DR-ATM/EFT" = DEBIT (money going OUT).
-   - "KUMPULAN WANG SIMPANAN PEKERJA" (EPF), "PERTUBUHAN KESELAMATAN SOSIAL" (SOCSO) = statutory payments.
-4. Number Formatting: Standardize numbers by removing commas.
+Analyze the statement text. Pay extreme attention to these Malaysian banking patterns:
 
-CRITICAL AMOUNT ASSIGNMENT RULE:
-Each amount belongs to the transaction it is DIRECTLY aligned with or immediately follows. Never swap amounts between transactions. A DR transaction gets its own amount as debit_amount, a CR/CDT transaction gets its own amount as credit_amount. If two transactions appear adjacent with different amounts, each keeps its own amount — do NOT mix them up.
+## MULTI-LINE TRANSACTION GROUPING (MOST IMPORTANT)
 
-Example of correct extraction:
-Text:
-  11/05 DEP-CASH CDT 1687 0273            5,000.00
-  11/05 DUITNOW TRSF DR 28223 DANION   100,000.00
+Bank statements group transactions per date. Under each date, there may be MULTIPLE transactions, each spanning 2-3 lines. Here is how to parse them:
+
+1. A line starting with "DD/MM" (e.g., "02/05") marks the START of a new date group. The date applies to ALL transactions that follow until the next date line.
+
+2. Within a date group, identify transaction boundaries using these signals:
+   - Lines containing a TRANSACTION CODE start a NEW transaction. Transaction codes include:
+     "TSFR FUND CR", "TSFR FUND DR", "DUITNOW TRSF DR", "DUITNOW TRSF CR",
+     "GIRO PYMT", "FPX", "DEP-CASH CDT", "IBG TRSF", "ATM CASH"
+   - Lines WITHOUT a transaction code (e.g., account numbers like "3149XXXXX", names like "MAHIRIBU SDN BHD", remarks like "BUDGET" or "PAYMENT") are CONTINUATION lines of the preceding transaction.
+
+3. The amount (e.g., "5,000.00", "30,000.00") at the END of a line belongs to THAT line's transaction.
+   - If the line has a transaction code containing "CR" or "CDT" → it's a credit_amount
+   - If the line has a transaction code containing "DR" → it's a debit_amount
+   - The amount on a continuation line (no transaction code) is NOT a separate transaction — it's additional info.
+
+## EXAMPLE OF CORRECT MULTI-LINE EXTRACTION
+
+Raw text:
+  02/05 TSFR FUND CR-ATM/EFT 631597          5,000.00
+        3149XXXXX MAHIRIBU SDN BHD BUDGET
+        TSFR FUND CR-ATM/EFT 631639         10,000.00
+        3149XXXXX MAHIRIBU SDN BHD PAYMENT
+        DUITNOW TRSF DR 674679 TAN KHENG   30,000.00
+  05/05 TSFR FUND CR-ATM/EFT 388594         12,000.00
+        3149XXXXX MAHIRIBU SDN BHD MARGIN
+        DUITNOW TRSF DR 410085              2,500.00
 
 Correct output:
   [
-    {"idx":1,"date":"2023-05-11","description":"DEP-CASH CDT 1687 0273","debit_amount":0,"credit_amount":5000.00,"category":"Credit/Deposit","payee":""},
-    {"idx":2,"date":"2023-05-11","description":"DUITNOW TRSF DR 28223 DANION","debit_amount":100000.00,"credit_amount":0,"category":"Fund Transfer","payee":"DANION A/L LEWIS"}
+    {"idx":1,"date":"2023-05-02","description":"TSFR FUND CR-ATM/EFT 631597 3149XXXXX MAHIRIBU SDN BHD BUDGET","debit_amount":0,"credit_amount":5000.00,"category":"Credit/Deposit","payee":"MAHIRIBU SDN BHD"},
+    {"idx":2,"date":"2023-05-02","description":"TSFR FUND CR-ATM/EFT 631639 3149XXXXX MAHIRIBU SDN BHD PAYMENT","debit_amount":0,"credit_amount":10000.00,"category":"Credit/Deposit","payee":"MAHIRIBU SDN BHD"},
+    {"idx":3,"date":"2023-05-02","description":"DUITNOW TRSF DR 674679 TAN KHENG KOOI PAYMENT","debit_amount":30000.00,"credit_amount":0,"category":"Fund Transfer","payee":"TAN KHENG KOOI"},
+    {"idx":4,"date":"2023-05-05","description":"TSFR FUND CR-ATM/EFT 388594 3149XXXXX MAHIRIBU SDN BHD MARGIN","debit_amount":0,"credit_amount":12000.00,"category":"Credit/Deposit","payee":"MAHIRIBU SDN BHD"},
+    {"idx":5,"date":"2023-05-05","description":"DUITNOW TRSF DR 410085","debit_amount":2500.00,"credit_amount":0,"category":"Fund Transfer","payee":""}
   ]
 
-To ensure exact chronological order of extraction, follow these strict rules:
-- Sequential Index: Add an incrementing integer "idx" starting from 1 for every single transaction extracted. Extract row-by-row top-to-bottom as printed. Do not sort by date during extraction.
+## TRANSACTION TYPE IDENTIFIERS
+- "TSFR FUND CR" or "DUITNOW TRSF CR" = CREDIT (money IN) → credit_amount
+- "TSFR FUND DR" or "DUITNOW TRSF DR" or "GIRO PYMT" or "FPX" = DEBIT (money OUT) → debit_amount
+- "DEP-CASH CDT" = Cash deposit CREDIT → credit_amount
+- "KUMPULAN WANG SIMPANAN PEKERJA" (EPF), "PERTUBUHAN KESELAMATAN SOSIAL" (SOCSO) = statutory payments → debit_amount
 
+## NUMBER FORMATTING
+Standardize numbers by removing commas. Date format: YYYY-MM-DD (infer year from statement header).
+
+## AMOUNT RULE
+Each amount belongs to the transaction it is DIRECTLY on the same line with. Never swap amounts between transactions. Never duplicate amounts.
+
+## SKIP
+- Lines with "Balance", "B/F", "C/F", "Opening Balance", "Closing Balance"
+- Lines that are purely account numbers without any transaction code or date
+- Account summary sections at the bottom
+
+## OUTPUT FORMAT
 Return a JSON array of objects. Each object MUST have exactly these fields:
-- "idx": Sequential incrementing integer starting from 1.
-- "date": transaction date in YYYY-MM-DD format. Infer the year from the statement header.
-- "description": The full combined multi-line transaction details. Keep it clean and readable, but preserve the core payee name, type, and crucial info (maximum 100 characters).
-- "debit_amount": amount DEBITED (money going OUT). Number, 0 if this is a credit. Never negative.
-- "credit_amount": amount CREDITED (money coming IN). Number, 0 if this is a debit. Never negative.
-- "category": classify as one of: "Payment", "Credit/Deposit", "Fund Transfer", "Bank Fee", "Interest", "Other"
-- "payee": Extract the recipient/payee name from the description. Strip away transaction codes and reference numbers. Keep ONLY the actual person or company name. Return empty string "" if no clear payee is identifiable.
+- "idx": Sequential integer starting from 1.
+- "date": YYYY-MM-DD format.
+- "description": Full combined multi-line description (max 100 chars). Include the payee name from continuation lines.
+- "debit_amount": number, 0 if credit. Never negative.
+- "credit_amount": number, 0 if debit. Never negative.
+- "category": "Payment" | "Credit/Deposit" | "Fund Transfer" | "Bank Fee" | "Interest" | "Other"
+- "payee": Person/company name from description. Strip codes and numbers. "" if none.
 
-CRITICAL RULES:
-1. Extract EVERY transaction row — do not summarize or skip
-2. If a row has a date and a description, it's a transaction
-3. Opening/closing balances are NOT transactions — skip them
-4. Each amount stays with its OWN transaction — never swap amounts between rows
-5. Return ONLY valid JSON array — no markdown, no explanations, no code blocks`;
+CRITICAL:
+1. Extract EVERY transaction — no skipping, no summarizing
+2. Each transaction code line = one transaction. Continuation lines = part of the same.
+3. Return ONLY valid JSON array — no markdown, no code blocks`;
 
 // ─── Post-extraction validator: cross-check DR/CR/CDT against amounts ───
 function validateAndCorrect(transactions, rawText) {
