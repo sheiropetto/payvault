@@ -559,6 +559,7 @@ export default function Transactions() {
           )}
         </button>
       </div>
+      </div>
 
       {/* Controls */}
       <div className="card mb-6">
