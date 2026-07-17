@@ -77,6 +77,9 @@ export const api = {
   updateTransactions: (updates) => request('/transactions', {
     method: 'PATCH', body: JSON.stringify({ updates }),
   }),
+  deleteTransactions: (statementId) => request(`/transactions?statement_id=${statementId}`, {
+    method: 'DELETE',
+  }),
 
   // AI Extraction
   extractTransactions: (statementId, text = '', provider = 'deepseek') => request('/deepseek/extract', {

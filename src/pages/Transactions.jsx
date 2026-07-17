@@ -3,12 +3,13 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Filter, Search, Save, CheckCircle2, AlertCircle,
   ArrowUpDown, ArrowUp, ArrowDown, Maximize2, Minimize2,
-  CheckSquare, Square, FileText, Replace, Printer, Check, Download
+  CheckSquare, Square, FileText, Replace, Printer, Check, Download, Trash2
 } from 'lucide-react';
 import { api } from '../utils/api';
 import { useCompany } from '../contexts/CompanyContext';
 import { useFullView } from '../contexts/FullViewContext';
 import { generateB5VoucherHTML, printB5Vouchers } from '../utils/format';
+import ConfirmModal from '../components/ui/ConfirmModal';
 import EmptyState from '../components/ui/EmptyState';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import Select from '../components/ui/Select';
@@ -131,6 +132,8 @@ export default function Transactions() {
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState(null);
   const [converting, setConverting] = useState(false);
+  const [deletingTxs, setDeletingTxs] = useState(false);
+  const [confirm, setConfirm] = useState(null);
   const [filterCategory, setFilterCategory] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [selected, setSelected] = useState(new Set());
@@ -424,6 +427,32 @@ export default function Transactions() {
     }
   }
 
+  async function handleDeleteAllTransactions() {
+    if (!selectedStmt || !transactions.length) return;
+    setConfirm({
+      title: 'Delete All Transactions',
+      message: `Delete all ${transactions.length} transaction(s) for this statement? The bank statement PDF is preserved — you can re-extract afterward. Linked vouchers will be unlinked.`,
+      variant: 'danger',
+      confirmLabel: `Delete All ${transactions.length} Transactions`,
+      onConfirm: async () => {
+        setDeletingTxs(true);
+        try {
+          const result = await api.deleteTransactions(selectedStmt);
+          setSaveStatus({ type: 'success', message: `${result.deleted} transaction(s) deleted.` });
+          await loadTransactions(selectedStmt);
+          clearSelection();
+          setConfirm(null);
+          setTimeout(() => setSaveStatus(null), 4000);
+        } catch (err) {
+          setSaveStatus({ type: 'error', message: err.message });
+          setConfirm(null);
+        } finally {
+          setDeletingTxs(false);
+        }
+      },
+    });
+  }
+
   // Build voucher HTML respecting settings (including combine)
   function buildVoucherHTML(txs) {
     const isCombined = printSettings.combine && printSettings.pageSize === 'A5';
@@ -621,6 +650,21 @@ export default function Transactions() {
                     { value: 'credit', label: 'Credit Only' }
                   ]}
                 />
+              </div>
+              <div>
+                <label className="label">&nbsp;</label>
+                <button
+                  className="btn-ghost text-xs flex items-center gap-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 h-9 px-3 rounded-lg border border-transparent hover:border-red-200"
+                  onClick={handleDeleteAllTransactions}
+                  disabled={deletingTxs || !transactions.length}
+                >
+                  {deletingTxs ? (
+                    <div className="w-3.5 h-3.5 border-2 border-red-300 border-t-red-500 rounded-full animate-spin" />
+                  ) : (
+                    <Trash2 className="w-3.5 h-3.5" strokeWidth={1.5} />
+                  )}
+                  {deletingTxs ? 'Deleting...' : `Clear (${transactions.length})`}
+                </button>
               </div>
               <div>
                 <button
@@ -1054,6 +1098,7 @@ export default function Transactions() {
           </div>
         </div>
       )}
+      {confirm && <ConfirmModal {...confirm} onClose={() => setConfirm(null)} />}
     </div>
   );
 }

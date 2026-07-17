@@ -58,6 +58,39 @@ export async function onRequest(context) {
       return Response.json(results);
     }
 
+    if (request.method === 'DELETE') {
+      if (!statementId) {
+        return Response.json({ error: 'statement_id required' }, { status: 400 });
+      }
+
+      // Unlink voucher_transactions and reset is_vouchered
+      const { results: linked } = await env.DB.prepare(
+        `SELECT DISTINCT vt.voucher_id, vt.transaction_id
+         FROM voucher_transactions vt
+         JOIN transactions t ON t.id = vt.transaction_id
+         WHERE t.bank_statement_id = ?`
+      ).bind(statementId).all();
+
+      for (const { voucher_id, transaction_id } of linked) {
+        await env.DB.prepare('DELETE FROM voucher_transactions WHERE voucher_id = ? AND transaction_id = ?')
+          .bind(voucher_id, transaction_id).run();
+        await env.DB.prepare('UPDATE transactions SET is_vouchered = 0 WHERE id = ?')
+          .bind(transaction_id).run();
+      }
+
+      // Delete transactions
+      const { meta } = await env.DB.prepare(
+        'DELETE FROM transactions WHERE bank_statement_id = ?'
+      ).bind(statementId).run();
+
+      // Reset statement status
+      await env.DB.prepare(
+        "UPDATE bank_statements SET status = 'pending' WHERE id = ?"
+      ).bind(statementId).run();
+
+      return Response.json({ deleted: meta.changes, unlinked_vouchers: linked.length });
+    }
+
     return new Response('Method not allowed', { status: 405 });
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 });
