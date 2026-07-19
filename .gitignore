@@ -4,3 +4,5 @@ dist/
 .dev.vars
 *.local
 .wrangler/
+*.pdf
+_sample_*
