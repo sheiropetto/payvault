@@ -5,6 +5,7 @@ import { useCompany } from '../contexts/CompanyContext';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import EmptyState from '../components/ui/EmptyState';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
+import Select from '../components/ui/Select';
 
 export default function Payees() {
   const { selectedCompanyId } = useCompany();
@@ -177,7 +178,7 @@ export default function Payees() {
                 {!mergeTarget ? (
                   <button
                     onClick={() => setMergeTarget(selectedList[0])}
-                    className="btn-secondary flex items-center gap-1.5 text-xs h-8"
+                    className="border border-zinc-300 bg-transparent text-zinc-700 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-zinc-50 transition-colors flex items-center gap-1.5"
                   >
                     <Merge className="w-3.5 h-3.5" strokeWidth={1.5} />
                     Merge Selected
@@ -185,18 +186,15 @@ export default function Payees() {
                 ) : (
                   <>
                     <span className="text-xs text-zinc-400">into</span>
-                    <select
-                      className="text-xs border border-zinc-300 rounded-lg px-2 py-1 bg-white text-zinc-700 focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                    <Select
                       value={mergeTarget}
-                      onChange={(e) => setMergeTarget(e.target.value)}
-                    >
-                      {selectedList.map(name => (
-                        <option key={name} value={name}>{name}</option>
-                      ))}
-                    </select>
+                      onChange={setMergeTarget}
+                      options={selectedList.map(name => ({ value: name, label: name }))}
+                      buttonClassName="px-2.5 py-1 text-xs min-w-[180px]"
+                    />
                     <button
                       onClick={handleMerge}
-                      className="px-3 py-1 rounded-lg bg-zinc-900 text-white text-xs font-medium hover:bg-zinc-800 transition-colors"
+                      className="border border-zinc-300 bg-transparent text-zinc-700 rounded-lg px-3 py-1 text-xs font-medium hover:bg-zinc-50 transition-colors"
                     >
                       Merge
                     </button>
