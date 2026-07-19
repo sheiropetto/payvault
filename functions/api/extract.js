@@ -203,7 +203,7 @@ async function callGemini(apiKey, pdfText) {
           }],
           generationConfig: { temperature: 0.05 }
         }),
-        signal: AbortSignal.timeout(30000), // Reduce timeout to 30s to fit within Cloudflare's request limits
+        signal: AbortSignal.timeout(55000), // 55s to stay within Cloudflare's 60s subrequest limit
       });
 
       if (!res.ok) {
