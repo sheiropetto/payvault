@@ -87,7 +87,9 @@ Return a JSON array of objects. Each object MUST have exactly these fields:
 CRITICAL:
 1. Extract EVERY transaction — no skipping, no summarizing
 2. Each transaction code line = one transaction. Continuation lines = part of the same.
-3. Return ONLY valid JSON array — no markdown, no code blocks`;
+3. Return ONLY valid JSON array — no markdown, no code blocks
+4. DEBIT transactions are the primary focus — ensure EVERY debit is captured.
+   Double-check that no debit is misclassified as credit.`;
 
 // ─── Post-extraction validator: cross-check DR/CR/CDT against amounts ───
 function validateAndCorrect(transactions, rawText) {
@@ -697,16 +699,22 @@ export async function onRequest(context) {
     );
 
     let insertedCount = 0;
+    let skippedCredits = 0;
     for (const tx of transactions) {
+      // Only insert debit transactions (payments) — skip credits/deposits
+      if ((tx.debit_amount || 0) <= 0) {
+        skippedCredits++;
+        continue;
+      }
       try {
-        // Fallback particulars for non-CSV (Gemini) entries
-        const txParticulars = tx.particulars || ((tx.debit_amount || 0) > 0 ? 'Payment' : 'Deposit');
+        // Fallback particulars for non-CSV entries
+        const txParticulars = tx.particulars || 'Payment';
         await insertStmt.bind(
           statement_id,
           tx.date,
           tx.description,
           tx.debit_amount || 0,
-          tx.credit_amount || 0,
+          0,
           tx.category || 'Other',
           tx.payee || '',
           txParticulars
@@ -738,13 +746,14 @@ export async function onRequest(context) {
         provider,
         total_extracted: transactions.length,
         total_inserted: insertedCount,
+        skipped_credits: skippedCredits,
         corrections: corrections.length,
         correction_details: corrections,
         message: stmt.file_type === 'csv'
-          ? `[System] Programmatically extracted ${insertedCount} transactions`
+          ? `[System] Extracted ${insertedCount} debits (${skippedCredits} credits skipped)`
           : corrections.length > 0
-            ? `[${provider}] Extracted ${insertedCount} transactions · Auto-corrected ${corrections.length} amount(s)`
-            : `[${provider}] Successfully extracted ${insertedCount} transactions`,
+            ? `[${provider}] Extracted ${insertedCount} debits · ${skippedCredits} credits skipped · Auto-corrected ${corrections.length} amount(s)`
+            : `[${provider}] Extracted ${insertedCount} debits (${skippedCredits} credits skipped)`,
       });
     } else {
       return Response.json({
@@ -752,10 +761,11 @@ export async function onRequest(context) {
         provider,
         total_extracted: transactions.length,
         total_inserted: insertedCount,
+        skipped_credits: skippedCredits,
         corrections: corrections.length,
         message: stmt.file_type === 'csv'
-          ? `[System] Extracted chunk ${chunk_index + 1} of ${total_chunks}`
-          : `[${provider}] Extracted chunk ${chunk_index + 1} of ${total_chunks}`,
+          ? `[System] Chunk ${chunk_index + 1}/${total_chunks} · ${insertedCount} debits`
+          : `[${provider}] Chunk ${chunk_index + 1}/${total_chunks} · ${insertedCount} debits`,
       });
     }
 
