@@ -51,6 +51,12 @@ Correct output:
 - "CHEQUE PROCESS FEE" = Bank fee DEBIT → debit_amount, category: "Bank Fee"
 - "KUMPULAN WANG SIMPANAN PEKERJA" (EPF), "PERTUBUHAN KESELAMATAN SOSIAL" (SOCSO), "LEMBAGA HASIL DALAM NEGERI" (LHDN) = statutory payments → debit_amount
 - "IBG TRSF" without CR/DR → check context: if amount is in debit column → debit; if credit column → credit
+- "AUTOMATED LOAN PYMT" → DEBIT (loan repayment) → debit_amount, category: "Payment"
+- "DR-ECP" prefix → DEBIT (direct debit for statutory payments like LHDN, EPF, SOCSO)
+- "DEP-ECP" prefix → CREDIT (incoming ECP deposit) → credit_amount, category: "Credit/Deposit"
+
+## RUNNING BALANCE — IGNORE IT
+The 5-digit/6-digit number that appears between the transaction amount and description is the RUNNING BALANCE. It is NOT part of the transaction. Never include it in amounts or description fields.
 
 ## NUMBER FORMATTING
 Standardize numbers by removing commas. Date format: YYYY-MM-DD (infer year from statement header, e.g., "Statement Date 31 May 2023" → year is 2023).
@@ -226,6 +232,76 @@ async function callGemini(apiKey, pdfText) {
       console.warn(`[Gemini API] Attempt ${attempt + 1} failed: ${err.message}`);
       if (attempt < maxRetries) {
         // Wait 1 second before retrying
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+  }
+
+  throw lastErr;
+}
+
+// ─── Call DeepSeek API (primary) ───
+async function callDeepSeek(apiKey, pdfText) {
+  const model = 'deepseek-chat';
+  const url = 'https://api.deepseek.com/v1/chat/completions';
+
+  let lastErr = null;
+  const maxRetries = 2;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{
+            role: 'user',
+            content: SYSTEM_PROMPT + '\n\n' + `Extract ALL transactions from this bank statement. Return ONLY a JSON array.\n\nRaw text:\n\n${pdfText.slice(0, 80000)}`
+          }],
+          temperature: 0,
+          max_tokens: 8192
+        }),
+        signal: AbortSignal.timeout(55000),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`DeepSeek API error (${res.status}): ${errText.slice(0, 500)}`);
+      }
+
+      const data = await res.json();
+      const content = data.choices?.[0]?.message?.content;
+      if (!content) throw new Error('DeepSeek returned empty response');
+
+      // DeepSeek sometimes wraps JSON in ```json blocks — strip it
+      let cleaned = content.trim();
+      if (cleaned.startsWith('```')) {
+        cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+      }
+
+      // Strip COUNT line if present
+      cleaned = cleaned.replace(/^COUNT:\s*\d+\s*\n?/im, '').trim();
+
+      const transactions = parseTransactions(cleaned);
+      if (!transactions || !Array.isArray(transactions) || transactions.length === 0) {
+        throw new Error(`DeepSeek returned 0 transactions. Raw response: ${content.slice(0, 150)}`);
+      }
+
+      // Normalize amounts: ensure 2 decimal places
+      for (const tx of transactions) {
+        if (typeof tx.debit_amount === 'number') tx.debit_amount = parseFloat(tx.debit_amount.toFixed(2));
+        if (typeof tx.credit_amount === 'number') tx.credit_amount = parseFloat(tx.credit_amount.toFixed(2));
+      }
+
+      return { transactions, provider: 'deepseek', usage: data.usage };
+    } catch (err) {
+      lastErr = err;
+      console.warn(`[DeepSeek API] Attempt ${attempt + 1} failed: ${err.message}`);
+      if (attempt < maxRetries) {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
@@ -590,13 +666,26 @@ export async function onRequest(context) {
         });
       }
     } else {
-      // ─── Use Gemini API ───
-      if (!env.GEMINI_API_KEY) {
-        return Response.json({ error: 'GEMINI_API_KEY not configured' }, { status: 500 });
+      // ─── AI-powered PDF extraction ───
+      // provider: 'deepseek' | 'gemini' (default: gemini)
+      const selectedProvider = (preferredProvider || 'gemini').toLowerCase();
+
+      if (selectedProvider === 'deepseek') {
+        if (!env.DEEPSEEK_API_KEY) {
+          return Response.json({ error: 'DEEPSEEK_API_KEY not configured' }, { status: 500 });
+        }
+        const result = await callDeepSeek(env.DEEPSEEK_API_KEY, pdfText);
+        provider = 'deepseek';
+        transactions = result.transactions;
+      } else {
+        if (!env.GEMINI_API_KEY) {
+          return Response.json({ error: 'GEMINI_API_KEY not configured' }, { status: 500 });
+        }
+        const result = await callGemini(env.GEMINI_API_KEY, pdfText);
+        provider = 'gemini';
+        transactions = result.transactions;
       }
-      const result = await callGemini(env.GEMINI_API_KEY, pdfText);
-      provider = 'gemini';
-      transactions = result.transactions;
+
       transactions.sort((a, b) => (a.idx || 0) - (b.idx || 0));
       corrections = validateAndCorrect(transactions, pdfText);
     }

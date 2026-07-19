@@ -82,8 +82,8 @@ export const api = {
   }),
 
   // AI Extraction
-  extractTransactions: (statementId, text = '', chunkIndex = undefined, totalChunks = undefined) => request('/extract', {
-    method: 'POST', body: JSON.stringify({ statement_id: statementId, text, chunk_index: chunkIndex, total_chunks: totalChunks }),
+  extractTransactions: (statementId, text = '', chunkIndex = undefined, totalChunks = undefined, provider = 'gemini') => request('/extract', {
+    method: 'POST', body: JSON.stringify({ statement_id: statementId, text, chunk_index: chunkIndex, total_chunks: totalChunks, provider }),
   }),
 
   // Vouchers

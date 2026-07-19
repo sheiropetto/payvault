@@ -37,6 +37,7 @@ export default function BankStatements() {
   const [confirm, setConfirm] = useState(null);
   const [extracting, setExtracting] = useState(null);
   const [extractStep, setExtractStep] = useState(''); // 'download' | 'extract-text' | 'ai-call' | 'saving'
+  const [extractProvider, setExtractProvider] = useState('gemini'); // 'gemini' | 'deepseek'
   const [statusMsg, setStatusMsg] = useState(null);
   const [retryStmt, setRetryStmt] = useState(null); // { stmt }
   const [selectedYear, setSelectedYear] = useState('');
@@ -119,7 +120,7 @@ export default function BankStatements() {
           for (let i = 0; i < pages.length; i++) {
             setExtractStep(`ai-call-${i + 1}-of-${pages.length}`);
             const pageText = pages[i];
-            lastResult = await api.extractTransactions(stmt.id, pageText, i, pages.length);
+            lastResult = await api.extractTransactions(stmt.id, pageText, i, pages.length, extractProvider);
           }
           setExtractStep('saving');
           if (lastResult) {
@@ -130,7 +131,7 @@ export default function BankStatements() {
         }
       } else {
         setExtractStep('csv-extract');
-        const result = await api.extractTransactions(stmt.id, '');
+        const result = await api.extractTransactions(stmt.id, '', undefined, undefined, extractProvider);
         setExtractStep('saving');
         setStatusMsg({ type: 'success', text: result.message });
       }
@@ -138,7 +139,7 @@ export default function BankStatements() {
       setTimeout(() => setStatusMsg(null), 5000);
     } catch (err) {
       console.error(err);
-      setStatusMsg({ type: 'error', text: stmt.file_type === 'pdf' ? `[Gemini] ${err.message}` : `[System] ${err.message}` });
+      setStatusMsg({ type: 'error', text: stmt.file_type === 'pdf' ? `[${extractProvider === 'deepseek' ? 'DeepSeek' : 'Gemini'}] ${err.message}` : `[System] ${err.message}` });
       setRetryStmt({ stmt });
     } finally {
       setExtracting(null);
@@ -282,6 +283,30 @@ export default function BankStatements() {
           <p className="text-sm text-zinc-500 mt-1">Upload PDF or CSV statements for AI extraction</p>
         </div>
         <div className="flex items-center gap-3">
+          {/* AI Provider selector */}
+          <div className="flex items-center gap-1.5 bg-zinc-100 rounded-lg p-0.5">
+            <button
+              onClick={() => setExtractProvider('gemini')}
+              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                extractProvider === 'gemini'
+                  ? 'bg-white text-zinc-900 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-700'
+              }`}
+            >
+              Gemini
+            </button>
+            <button
+              onClick={() => setExtractProvider('deepseek')}
+              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                extractProvider === 'deepseek'
+                  ? 'bg-white text-zinc-900 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-700'
+              }`}
+            >
+              DeepSeek
+            </button>
+          </div>
+
           {allYears.length >= 1 && (
             <div className="w-20">
               <Select
@@ -400,8 +425,8 @@ export default function BankStatements() {
                 {extractStep.startsWith('ai-call') && (
                   <><Sparkles className="w-3 h-3" strokeWidth={1.5} /> {
                     extractStep === 'ai-call'
-                      ? 'Gemini is analyzing...'
-                      : `Gemini is analyzing page ${extractStep.replace('ai-call-', '').replace('-of-', ' of ')}...`
+                      ? `${extractProvider === 'deepseek' ? 'DeepSeek' : 'Gemini'} is analyzing...`
+                      : `${extractProvider === 'deepseek' ? 'DeepSeek' : 'Gemini'} is analyzing page ${extractStep.replace('ai-call-', '').replace('-of-', ' of ')}...`
                   }</>
                 )}
                 {extractStep === 'saving' && <><Save className="w-3 h-3" strokeWidth={1.5} /> Saving transactions...</>}

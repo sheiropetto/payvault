@@ -14,4 +14,6 @@ binding = "STORAGE"
 bucket_name = "payvault-storage"
 
 [vars]
-# Gemini API key is set via wrangler pages secret put GEMINI_API_KEY
+# API keys are set via wrangler pages secret put GEMINI_API_KEY / DEEPSEEK_API_KEY
+GEMINI_API_KEY = ""
+DEEPSEEK_API_KEY = ""
