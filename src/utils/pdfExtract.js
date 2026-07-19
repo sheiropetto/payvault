@@ -10,7 +10,7 @@ export async function extractTextFromPDF(file) {
   try {
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    let fullText = '';
+    const pages = [];
 
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
@@ -18,10 +18,10 @@ export async function extractTextFromPDF(file) {
       const pageText = content.items
         .map((item) => item.str)
         .join(' ');
-      fullText += pageText + '\n';
+      pages.push(pageText);
     }
 
-    return fullText;
+    return pages;
   } catch (err) {
     console.error('PDF extraction error:', err);
     throw err;

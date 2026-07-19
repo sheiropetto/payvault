@@ -230,7 +230,7 @@ export async function onRequest(context) {
       return new Response('Method not allowed', { status: 405 });
     }
 
-    const { statement_id, text, provider: preferredProvider } = await request.json();
+    const { statement_id, text, provider: preferredProvider, chunk_index, total_chunks } = await request.json();
     if (!statement_id) {
       return Response.json({ error: 'statement_id required' }, { status: 400 });
     }
@@ -243,10 +243,31 @@ export async function onRequest(context) {
       return Response.json({ error: 'Statement not found' }, { status: 404 });
     }
 
-    // Update status to processing
-    await env.DB.prepare(
-      "UPDATE bank_statements SET status = 'processing' WHERE id = ?"
-    ).bind(statement_id).run();
+    // If first chunk or not chunked, clean up existing transactions and reset status
+    if (chunk_index === undefined || chunk_index === 0) {
+      // Unlink voucher_transactions
+      const { results: linked } = await env.DB.prepare(
+        `SELECT DISTINCT vt.voucher_id, vt.transaction_id
+         FROM voucher_transactions vt
+         JOIN transactions t ON t.id = vt.transaction_id
+         WHERE t.bank_statement_id = ?`
+      ).bind(statement_id).all();
+
+      for (const { voucher_id, transaction_id } of linked) {
+        await env.DB.prepare('DELETE FROM voucher_transactions WHERE voucher_id = ? AND transaction_id = ?')
+          .bind(voucher_id, transaction_id).run();
+      }
+
+      // Delete transactions
+      await env.DB.prepare(
+        'DELETE FROM transactions WHERE bank_statement_id = ?'
+      ).bind(statement_id).run();
+
+      // Update status to processing
+      await env.DB.prepare(
+        "UPDATE bank_statements SET status = 'processing' WHERE id = ?"
+      ).bind(statement_id).run();
+    }
 
     let pdfText = text;
 
@@ -313,26 +334,43 @@ export async function onRequest(context) {
       }
     }
 
-    // Update statement status, auto-detect year/month, and auto-rename filename
-    const firstDate = transactions[0]?.date || '';
-    const detectedYear = firstDate.slice(0, 4) || null;
-    const detectedMonth = firstDate.slice(5, 7) || null;
-    const properName = toProperFilename(stmt.filename, detectedMonth ? parseInt(detectedMonth) : null, detectedYear ? parseInt(detectedYear) : null, stmt.file_type);
-    await env.DB.prepare(
-      "UPDATE bank_statements SET status = 'done', year = ?, month = ?, filename = ? WHERE id = ?"
-    ).bind(detectedYear, detectedMonth, properName, statement_id).run();
+    // Finalize statement metadata on last chunk or if not chunked
+    const isLastChunk = chunk_index === undefined || total_chunks === undefined || chunk_index === total_chunks - 1;
+    if (isLastChunk) {
+      const { results: allTx } = await env.DB.prepare(
+        'SELECT date FROM transactions WHERE bank_statement_id = ? ORDER BY date ASC LIMIT 1'
+      ).bind(statement_id).all();
 
-    return Response.json({
-      success: true,
-      provider,
-      total_extracted: transactions.length,
-      total_inserted: insertedCount,
-      corrections: corrections.length,
-      correction_details: corrections,
-      message: corrections.length > 0
-        ? `[${provider}] Extracted ${insertedCount} transactions · Auto-corrected ${corrections.length} amount(s)`
-        : `[${provider}] Successfully extracted ${insertedCount} transactions`,
-    });
+      const firstDate = allTx[0]?.date || '';
+      const detectedYear = firstDate.slice(0, 4) || null;
+      const detectedMonth = firstDate.slice(5, 7) || null;
+      const properName = toProperFilename(stmt.filename, detectedMonth ? parseInt(detectedMonth) : null, detectedYear ? parseInt(detectedYear) : null, stmt.file_type);
+
+      await env.DB.prepare(
+        "UPDATE bank_statements SET status = 'done', year = ?, month = ?, filename = ? WHERE id = ?"
+      ).bind(detectedYear, detectedMonth, properName, statement_id).run();
+
+      return Response.json({
+        success: true,
+        provider,
+        total_extracted: transactions.length,
+        total_inserted: insertedCount,
+        corrections: corrections.length,
+        correction_details: corrections,
+        message: corrections.length > 0
+          ? `[${provider}] Extracted ${insertedCount} transactions · Auto-corrected ${corrections.length} amount(s)`
+          : `[${provider}] Successfully extracted ${insertedCount} transactions`,
+      });
+    } else {
+      return Response.json({
+        success: true,
+        provider,
+        total_extracted: transactions.length,
+        total_inserted: insertedCount,
+        corrections: corrections.length,
+        message: `[${provider}] Extracted chunk ${chunk_index + 1} of ${total_chunks}`,
+      });
+    }
 
   } catch (err) {
     try {

@@ -105,19 +105,31 @@ export default function BankStatements() {
     setStatusMsg(null);
     setRetryStmt(null);
     try {
-      let text = '';
-
-      // For PDFs: extract text client-side using pdfjs (better than server extraction)
       if (stmt.file_type === 'pdf') {
         const blob = await api.downloadStatement(stmt.id);
         setExtractStep('extract-text');
-        text = await extractTextFromPDF(blob);
-      }
+        const pages = await extractTextFromPDF(blob);
 
-      setExtractStep('ai-call');
-      const result = await api.extractTransactions(stmt.id, text);
-      setExtractStep('saving');
-      setStatusMsg({ type: 'success', text: `[Gemini] ${result.message}` });
+        if (pages && pages.length > 0) {
+          let lastResult = null;
+          for (let i = 0; i < pages.length; i++) {
+            setExtractStep(`ai-call-${i + 1}-of-${pages.length}`);
+            const pageText = pages[i];
+            lastResult = await api.extractTransactions(stmt.id, pageText, i, pages.length);
+          }
+          setExtractStep('saving');
+          if (lastResult) {
+            setStatusMsg({ type: 'success', text: `[Gemini] ${lastResult.message}` });
+          }
+        } else {
+          throw new Error('No text found in PDF');
+        }
+      } else {
+        setExtractStep('ai-call');
+        const result = await api.extractTransactions(stmt.id, '');
+        setExtractStep('saving');
+        setStatusMsg({ type: 'success', text: `[Gemini] ${result.message}` });
+      }
       await loadData();
       setTimeout(() => setStatusMsg(null), 5000);
     } catch (err) {
@@ -382,13 +394,19 @@ export default function BankStatements() {
               <span className="flex items-center gap-1.5">
                 {extractStep === 'download' && <><Download className="w-3 h-3" strokeWidth={1.5} /> Downloading PDF...</>}
                 {extractStep === 'extract-text' && <><FileText className="w-3 h-3" strokeWidth={1.5} /> Reading PDF text...</>}
-                {extractStep === 'ai-call' && <><Sparkles className="w-3 h-3" strokeWidth={1.5} /> Gemini is analyzing...</>}
+                {extractStep.startsWith('ai-call') && (
+                  <><Sparkles className="w-3 h-3" strokeWidth={1.5} /> {
+                    extractStep === 'ai-call' 
+                      ? 'Gemini is analyzing...' 
+                      : `Gemini is analyzing page ${extractStep.replace('ai-call-', '').replace('-of-', ' of ')}...`
+                  }</>
+                )}
                 {extractStep === 'saving' && <><Save className="w-3 h-3" strokeWidth={1.5} /> Saving transactions...</>}
               </span>
               <span>
                 {extractStep === 'download' && '1/4'}
                 {extractStep === 'extract-text' && '2/4'}
-                {extractStep === 'ai-call' && '3/4'}
+                {extractStep.startsWith('ai-call') && '3/4'}
                 {extractStep === 'saving' && '4/4'}
               </span>
             </div>
@@ -398,7 +416,7 @@ export default function BankStatements() {
                 style={{
                   width: extractStep === 'download' ? '25%' :
                          extractStep === 'extract-text' ? '50%' :
-                         extractStep === 'ai-call' ? '75%' : '100%'
+                         extractStep.startsWith('ai-call') ? '75%' : '100%'
                 }}
               />
             </div>
