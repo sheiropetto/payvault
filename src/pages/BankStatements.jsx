@@ -111,6 +111,10 @@ export default function BankStatements() {
         const pages = await extractTextFromPDF(blob);
 
         if (pages && pages.length > 0) {
+          const totalTextLength = pages.reduce((sum, p) => sum + (p || '').trim().length, 0);
+          if (totalTextLength === 0) {
+            throw new Error('This PDF appears to be scanned or contains no selectable text. Please upload a structured (digital) PDF or a CSV file instead.');
+          }
           let lastResult = null;
           for (let i = 0; i < pages.length; i++) {
             setExtractStep(`ai-call-${i + 1}-of-${pages.length}`);
