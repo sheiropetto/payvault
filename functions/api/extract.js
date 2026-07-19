@@ -186,7 +186,7 @@ function parseTransactions(content) {
 
 // ─── Call Gemini API (fallback) ───
 async function callGemini(apiKey, pdfText) {
-  const model = 'gemini-3.5-flash';
+  const model = 'gemini-2.0-flash';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   let lastErr = null;
