@@ -107,4 +107,7 @@ export const api = {
   renamePayee: (oldPayee, newPayee) => request('/payees', {
     method: 'PATCH', body: JSON.stringify({ oldPayee, newPayee }),
   }),
+  mergePayees: (from, to) => request('/payees', {
+    method: 'POST', body: JSON.stringify({ from, to }),
+  }),
 };

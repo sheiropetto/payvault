@@ -44,6 +44,26 @@ export async function onRequest(context) {
       return Response.json({ updated: meta.changes, oldPayee, newPayee });
     }
 
+    if (request.method === 'POST') {
+      const { from, to } = await request.json();
+      if (!Array.isArray(from) || from.length < 2 || !to) {
+        return Response.json({ error: 'from (array of 2+ payees) and to (target payee) required' }, { status: 400 });
+      }
+      if (!from.includes(to)) {
+        return Response.json({ error: 'to must be one of the from payees' }, { status: 400 });
+      }
+
+      const others = from.filter(p => p !== to);
+      const placeholders = others.map(() => '?').join(',');
+      const params = [to, ...others];
+
+      const { meta } = await env.DB.prepare(
+        `UPDATE transactions SET payee = ?, is_edited = 1 WHERE payee IN (${placeholders})`
+      ).bind(...params).run();
+
+      return Response.json({ updated: meta.changes, merged: others, into: to });
+    }
+
     return new Response('Method not allowed', { status: 405 });
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 });
