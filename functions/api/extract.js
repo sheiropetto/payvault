@@ -320,7 +320,10 @@ function parseAmount(val) {
 
 function findHeaderAndMap(rows) {
   const dateKeywords = ['date', 'tarikh', 'value date', 'trn date', 'posting date'];
-  const descKeywords = ['description', 'particulars', 'transaction description', 'details', 'transaction details', 'remarks', 'butiran'];
+  const descKeywords = ['description', 'transaction description', 'details', 'transaction details', 'remarks', 'description / payee', 'description/payee'];
+  const particularsKeywords = ['particulars', 'butiran_transaksi', 'butiran'];
+  const payeeKeywords = ['to', 'payee', 'beneficiary', 'recipient', 'penerima'];
+  const categoryKeywords = ['category', 'kategori'];
   const debitKeywords = ['debit', 'withdrawal', 'amount out', 'out', 'payment', 'charges'];
   const creditKeywords = ['credit', 'deposit', 'amount in', 'in', 'received'];
   const amountKeywords = ['amount', 'amount (rm)', 'jumlah', 'transaction amount'];
@@ -330,6 +333,9 @@ function findHeaderAndMap(rows) {
     
     let dateIdx = -1;
     let descIdx = -1;
+    let particularsIdx = -1;
+    let payeeIdx = -1;
+    let categoryIdx = -1;
     let debitIdx = -1;
     let creditIdx = -1;
     let amountIdx = -1;
@@ -340,15 +346,24 @@ function findHeaderAndMap(rows) {
 
       if (dateIdx === -1 && dateKeywords.some(kw => cell.includes(kw))) dateIdx = c;
       else if (descIdx === -1 && descKeywords.some(kw => cell.includes(kw))) descIdx = c;
+      else if (particularsIdx === -1 && particularsKeywords.some(kw => cell.includes(kw))) particularsIdx = c;
+      else if (payeeIdx === -1 && payeeKeywords.some(kw => cell.includes(kw))) payeeIdx = c;
+      else if (categoryIdx === -1 && categoryKeywords.some(kw => cell.includes(kw))) categoryIdx = c;
       else if (debitIdx === -1 && debitKeywords.some(kw => cell.includes(kw))) debitIdx = c;
       else if (creditIdx === -1 && creditKeywords.some(kw => cell.includes(kw))) creditIdx = c;
       else if (amountIdx === -1 && amountKeywords.some(kw => cell.includes(kw))) amountIdx = c;
     }
 
+    // Fallback description index to particulars index if description is missing
+    if (descIdx === -1 && particularsIdx !== -1) {
+      descIdx = particularsIdx;
+      particularsIdx = -1;
+    }
+
     if (dateIdx !== -1 && descIdx !== -1 && (amountIdx !== -1 || debitIdx !== -1 || creditIdx !== -1)) {
       return {
         headerRowIndex: r,
-        mapping: { dateIdx, descIdx, debitIdx, creditIdx, amountIdx }
+        mapping: { dateIdx, descIdx, particularsIdx, payeeIdx, categoryIdx, debitIdx, creditIdx, amountIdx }
       };
     }
   }
@@ -474,7 +489,7 @@ export async function onRequest(context) {
       }
 
       const { headerRowIndex, mapping } = headerInfo;
-      const { dateIdx, descIdx, debitIdx, creditIdx, amountIdx } = mapping;
+      const { dateIdx, descIdx, particularsIdx, payeeIdx, categoryIdx, debitIdx, creditIdx, amountIdx } = mapping;
 
       for (let i = headerRowIndex + 1; i < rows.length; i++) {
         const row = rows[i];
@@ -502,14 +517,60 @@ export async function onRequest(context) {
           }
         }
 
+        // Extract particulars, payee/TO, and category if they exist
+        let particulars = '';
+        if (particularsIdx !== -1 && row[particularsIdx]) {
+          particulars = row[particularsIdx].trim();
+        } else {
+          particulars = debit_amount > 0 ? 'Payment' : 'Deposit';
+        }
+
+        let payee = '';
+        if (payeeIdx !== -1 && row[payeeIdx]) {
+          payee = row[payeeIdx].trim();
+        } else {
+          payee = cleanPayeeName(description);
+        }
+
+        let category = '';
+        if (categoryIdx !== -1 && row[categoryIdx]) {
+          category = row[categoryIdx].trim();
+        }
+
+        const standardCategories = ['Payment', 'Credit/Deposit', 'Fund Transfer', 'Bank Fee', 'Interest', 'Other'];
+        if (category) {
+          const catLower = category.toLowerCase();
+          if (catLower === 'income' || catLower === 'deposit') {
+            category = 'Credit/Deposit';
+          } else if (catLower === 'payment' || catLower === 'cheque' || catLower === 'loan payment') {
+            category = 'Payment';
+          } else if (catLower === 'fund transfer') {
+            category = 'Fund Transfer';
+          } else if (catLower === 'bank fee' || catLower === 'cheque fee') {
+            category = 'Bank Fee';
+          } else if (catLower === 'interest') {
+            category = 'Interest';
+          } else if (!standardCategories.includes(category)) {
+            category = guessCategory(description);
+          }
+        } else {
+          category = guessCategory(description);
+        }
+
+        // Force credit transactions to Credit/Deposit category if they ended up under Payment/Other
+        if (credit_amount > 0 && (!category || category === 'Payment' || category === 'Other')) {
+          category = 'Credit/Deposit';
+        }
+
         transactions.push({
           idx: transactions.length + 1,
           date: normalized,
           description: description.slice(0, 100),
           debit_amount,
           credit_amount,
-          category: guessCategory(description),
-          payee: cleanPayeeName(description)
+          category,
+          payee,
+          particulars
         });
       }
     } else {
@@ -526,13 +587,15 @@ export async function onRequest(context) {
 
     // Insert into DB (no balance column)
     const insertStmt = env.DB.prepare(
-      `INSERT INTO transactions (bank_statement_id, date, description, debit_amount, credit_amount, category, payee)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO transactions (bank_statement_id, date, description, debit_amount, credit_amount, category, payee, particulars)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
     let insertedCount = 0;
     for (const tx of transactions) {
       try {
+        // Fallback particulars for non-CSV (Gemini) entries
+        const txParticulars = tx.particulars || ((tx.debit_amount || 0) > 0 ? 'Payment' : 'Deposit');
         await insertStmt.bind(
           statement_id,
           tx.date,
@@ -540,7 +603,8 @@ export async function onRequest(context) {
           tx.debit_amount || 0,
           tx.credit_amount || 0,
           tx.category || 'Other',
-          tx.payee || ''
+          tx.payee || '',
+          txParticulars
         ).run();
         insertedCount++;
       } catch (e) {
