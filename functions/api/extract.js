@@ -189,33 +189,49 @@ async function callGemini(apiKey, pdfText) {
   const model = 'gemini-3.5-flash';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{
-        parts: [{ text: SYSTEM_PROMPT + '\n\n' + `Extract ALL transactions from this bank statement. Return ONLY a JSON array.\n\nRaw text:\n\n${pdfText.slice(0, 80000)}` }]
-      }],
-      generationConfig: { temperature: 0.05 }
-    }),
-    signal: AbortSignal.timeout(120000),
-  });
+  let lastErr = null;
+  const maxRetries = 2;
 
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`Gemini API error (${res.status}): ${errText.slice(0, 500)}`);
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{ text: SYSTEM_PROMPT + '\n\n' + `Extract ALL transactions from this bank statement. Return ONLY a JSON array.\n\nRaw text:\n\n${pdfText.slice(0, 80000)}` }]
+          }],
+          generationConfig: { temperature: 0.05 }
+        }),
+        signal: AbortSignal.timeout(30000), // Reduce timeout to 30s to fit within Cloudflare's request limits
+      });
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Gemini API error (${res.status}): ${errText.slice(0, 500)}`);
+      }
+
+      const data = await res.json();
+      const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!content) throw new Error('Gemini returned empty response');
+
+      const transactions = parseTransactions(content);
+      if (!transactions || !Array.isArray(transactions) || transactions.length === 0) {
+        throw new Error(`Gemini returned 0 transactions. Raw response: ${content ? content.slice(0, 150) : 'empty'}`);
+      }
+
+      return { transactions, provider: 'gemini', usage: data.usageMetadata };
+    } catch (err) {
+      lastErr = err;
+      console.warn(`[Gemini API] Attempt ${attempt + 1} failed: ${err.message}`);
+      if (attempt < maxRetries) {
+        // Wait 1 second before retrying
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
   }
 
-  const data = await res.json();
-  const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!content) throw new Error('Gemini returned empty response');
-
-  const transactions = parseTransactions(content);
-  if (!transactions || !Array.isArray(transactions) || transactions.length === 0) {
-    throw new Error(`Gemini returned 0 transactions. Raw response: ${content ? content.slice(0, 150) : 'empty'}`);
-  }
-
-  return { transactions, provider: 'gemini', usage: data.usageMetadata };
+  throw lastErr;
 }
 
 // ─── Programmatic CSV parsing helpers ───
