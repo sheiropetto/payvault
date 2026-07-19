@@ -672,14 +672,9 @@ export async function onRequest(context) {
       // provider: 'deepseek' | 'gemini' (default: deepseek)
       const selectedProvider = (preferredProvider || 'deepseek').toLowerCase();
 
-      // Debug: log available env keys
-      console.log('[extract] Available env keys:', Object.keys(env).join(', '));
-      console.log('[extract] DEEPSEEK_API_KEY exists:', !!env.DEEPSEEK_API_KEY);
-      console.log('[extract] GEMINI_API_KEY exists:', !!env.GEMINI_API_KEY);
-
       if (selectedProvider === 'deepseek') {
         if (!env.DEEPSEEK_API_KEY) {
-          return Response.json({ error: 'DEEPSEEK_API_KEY not configured. Available keys: ' + Object.keys(env).join(', ') }, { status: 500 });
+          return Response.json({ error: 'DEEPSEEK_API_KEY not configured' }, { status: 500 });
         }
         const result = await callDeepSeek(env.DEEPSEEK_API_KEY, pdfText);
         provider = 'deepseek';
