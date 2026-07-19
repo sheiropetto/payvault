@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Search, Pencil, Check, X, Users, Square, CheckSquare, Merge } from 'lucide-react';
+import { Search, Pencil, Check, X, Users, Square, CheckSquare, Merge, Sparkles } from 'lucide-react';
 import { api } from '../utils/api';
 import { useCompany } from '../contexts/CompanyContext';
 import ConfirmModal from '../components/ui/ConfirmModal';
@@ -61,6 +61,68 @@ export default function Payees() {
       return new Set(filtered.map(p => p.payee));
     });
     setMergeTarget(null);
+  }
+
+  function handleFindDuplicates() {
+    function normalize(name) {
+      return name.toLowerCase()
+        .replace(/\./g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    // Group by normalized form
+    const normMap = new Map();
+    for (const p of payees) {
+      const norm = normalize(p.payee);
+      if (!normMap.has(norm)) normMap.set(norm, []);
+      normMap.get(norm).push(p.payee);
+    }
+
+    // Build duplicate groups
+    const groups = [];
+
+    // Step 1: groups from exact normalization matches (e.g. dot differences)
+    for (const [, group] of normMap) {
+      if (group.length >= 2) groups.push([...group]);
+    }
+
+    // Step 2: substring matches (e.g. truncation)
+    const norms = [...normMap.keys()];
+    for (let i = 0; i < norms.length; i++) {
+      for (let j = i + 1; j < norms.length; j++) {
+        const longer = norms[i].length > norms[j].length ? norms[i] : norms[j];
+        const shorter = norms[i].length > norms[j].length ? norms[j] : norms[i];
+        if (shorter.length >= 4 && longer.includes(shorter) && shorter.length / longer.length >= 0.6) {
+          const all = [...new Set([...normMap.get(norms[i]), ...normMap.get(norms[j])])];
+          if (all.length >= 2) groups.push(all);
+        }
+      }
+    }
+
+    // Deduplicate — each name in only one group, keep largest groups first
+    const used = new Set();
+    const finalNames = [];
+    groups.sort((a, b) => b.length - a.length);
+    for (const g of groups) {
+      const fresh = g.filter(n => !used.has(n));
+      if (fresh.length >= 2) {
+        finalNames.push(...fresh);
+        fresh.forEach(n => used.add(n));
+      }
+    }
+
+    if (finalNames.length === 0) {
+      setStatus({ type: 'success', message: 'No duplicates found.' });
+      setTimeout(() => setStatus(null), 3000);
+      return;
+    }
+
+    setSelected(new Set(finalNames));
+    setMergeTarget(null);
+
+    const groupCount = groups.filter(g => g.filter(n => finalNames.includes(n)).length >= 2).length;
+    setStatus({ type: 'success', message: `Found ${finalNames.length} payees in ${groupCount} duplicate group(s). Select two and click Merge.` });
   }
 
   function startEdit(payee) {
@@ -172,6 +234,14 @@ export default function Payees() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
+            <button
+              onClick={handleFindDuplicates}
+              className="border border-zinc-300 bg-transparent text-zinc-700 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-zinc-50 transition-colors flex items-center gap-1.5"
+              title="Find duplicate payee names"
+            >
+              <Sparkles className="w-3.5 h-3.5" strokeWidth={1.5} />
+              Find Duplicates
+            </button>
             {selectedList.length >= 2 && (
               <div className="flex items-center gap-2">
                 <span className="text-xs text-zinc-500">{selectedList.length} selected</span>
