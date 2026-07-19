@@ -1,95 +1,308 @@
 import { authenticate } from '../utils/auth';
 import { toProperFilename } from './bank-statements/index';
 
-const SYSTEM_PROMPT = `Act as an expert data extraction engine specializing in financial documents. You are parsing text from Malaysian bank statements into structured JSON.
+const SYSTEM_PROMPT = `Act as an expert data extraction engine specializing in financial documents. You are categorizing pre-parsed Malaysian bank statement transactions.
 
-Analyze the statement text. Pay extreme attention to these Malaysian banking patterns:
+## INPUT FORMAT
+You will receive transactions in this clean format, one per line:
+  [IDX] DD/MM | TYPE | AMOUNT | DESCRIPTION
 
-## MULTI-LINE TRANSACTION GROUPING (MOST IMPORTANT)
+Where:
+- IDX = sequential number (preserve this exact index in output)
+- DD/MM = transaction date (day/month)
+- TYPE = "DEBIT" or "CREDIT" (already determined — DO NOT change this)
+- AMOUNT = the exact transaction amount (already verified — DO NOT change this)
+- DESCRIPTION = raw transaction description text
 
-Bank statements group transactions per date. Under each date, there may be MULTIPLE transactions, each spanning 2-3 lines. Here is how to parse them:
+## YOUR TASK
+For each transaction, you must:
+1. Keep the IDX, date, type, and amount EXACTLY as provided. DO NOT modify them.
+2. Assign a "category" based on the description
+3. Extract a clean "payee" name from the description
 
-1. A line starting with "DD/MM" (e.g., "02/05") marks the START of a new date group. The date applies to ALL transactions that follow until the next date line.
+## CATEGORY RULES
+- "CHQ PROCESS FEE" or "CHEQUE PROCESS FEE" → category: "Bank Fee"
+- "AUTOMATED LOAN PYMT" → category: "Payment"
+- "DUITNOW TRSF DR", "DUITNOW TRSF CR", "GIRO PYMT", "FPX" → category: "Fund Transfer"
+- "TSFR FUND DR", "TSFR FUND CR" → category: "Fund Transfer"
+- "DR-ECP" with LEMBAGA HASIL/EPF/KWSP/SOCSO/PERKESO → category: "Payment"
+- "DEP-CASH", "DEP-ECP" → category: "Credit/Deposit"
+- "CHEQ" (not CHQ PROCESS FEE) → category: "Payment"
+- If description contains "SALARY", "PAYMENT", "RENTAL", "CLAIM", "EXPENSES", "INSTALLMENT" → category: "Payment"
+- Otherwise: use "Fund Transfer" for DUITNOW/TRSF/IBG, "Payment" for general debits
 
-2. Within a date group, identify transaction boundaries using these signals:
-   - Lines containing a TRANSACTION CODE start a NEW transaction. Transaction codes include:
-     "TSFR FUND CR", "TSFR FUND DR", "DUITNOW TRSF DR", "DUITNOW TRSF CR",
-     "GIRO PYMT", "FPX", "DEP-CASH CDT", "IBG TRSF", "ATM CASH",
-     "CHEQUE PROCESS FEE", "LEMBAGA HASIL DALAM NEGERI"
-   - Lines WITHOUT a transaction code (e.g., account numbers like "3149XXXXX", names like "MAHIRIBU SDN BHD", remarks like "BUDGET" or "PAYMENT") are CONTINUATION lines of the preceding transaction.
+## PAYEE EXTRACTION RULES
+Extract the payee name from the description:
+- For "TSFR FUND DR-ATM/EFT XXXXXX ACCOUNT_NUM PAYEE_NAME..." → extract PAYEE_NAME
+- For "DUITNOW TRSF DR XXXXXX PAYEE_NAME..." → extract PAYEE_NAME  
+- For "GIRO PYMT-ATM/EFT XXXXXX PAYEE_NAME..." → extract PAYEE_NAME
+- For "DR-ECP XXXXXX... LEMBAGA HASIL DALAM NEGERI..." → payee: "LEMBAGA HASIL DALAM NEGERI"
+- For "DR-ECP XXXXXX... KUMPULAN WANG SIMPANAN PEKERJA..." → payee: "KUMPULAN WANG SIMPANAN PEKERJA"
+- For "DR-ECP XXXXXX... PERTUBUHAN KESELAMATAN SOSIAL..." → payee: "PERTUBUHAN KESELAMATAN SOSIAL"
+- For "CHEQ NNNNNN" → payee: "" (unknown cheque recipient)
+- For "CHQ PROCESS FEE" → payee: ""
+- For "AUTOMATED LOAN PYMT" → payee: ""
+- For "FPX - XXXX" → payee: ""
+- For "DEP-CASH" → payee: ""
+- Strip account numbers (like "3149XXXXXX", "4889XXXXXX", "3218XXXXXX"), reference numbers, and transaction codes from payee
+- Payee should be a clean person or company name, max 50 chars
+- If no payee can be determined, use ""
 
-3. The amount (e.g., "5,000.00", "30,000.00") at the END of a line belongs to THAT line's transaction.
-   - If the line has a transaction code containing "CR" or "CDT" → it's a credit_amount
-   - If the line has a transaction code containing "DR" → it's a debit_amount
-   - The amount on a continuation line (no transaction code) is NOT a separate transaction — it's additional info.
+## EXAMPLES
 
-## EXAMPLE OF CORRECT MULTI-LINE EXTRACTION
+Input:
+[1] 02/10 | DEBIT | 3000.00 | TSFR FUND DR-ATM/EFT 060007 4889XXXXXX SAHARI BIN AHMAD PAYMENT
+[2] 04/10 | CREDIT | 50000.00 | TSFR FUND CR-ATM/EFT 696205 3149XXXXXX MAHIRIBU SDN BHD PAYMENT
+[3] 04/10 | DEBIT | 0.50 | CHQ PROCESS FEE DR 344367
+[4] 11/10 | DEBIT | 3240.00 | DR-ECP 704127 2310111450160437 KUMPULAN WANG SIMPANAN PEKERJA 1020230023390957C129706883 NO DEFINE
 
-Raw text:
-  02/05 TSFR FUND CR-ATM/EFT 631597          5,000.00
-        3149XXXXX MAHIRIBU SDN BHD BUDGET
-        TSFR FUND CR-ATM/EFT 631639         10,000.00
-        3149XXXXX MAHIRIBU SDN BHD PAYMENT
-        DUITNOW TRSF DR 674679 TAN KHENG   30,000.00
-  05/05 TSFR FUND CR-ATM/EFT 388594         12,000.00
-        3149XXXXX MAHIRIBU SDN BHD MARGIN
-        DUITNOW TRSF DR 410085              2,500.00
+Output:
+[
+  {"idx":1,"date":"2023-10-02","description":"TSFR FUND DR-ATM/EFT 060007 4889XXXXXX SAHARI BIN AHMAD PAYMENT","debit_amount":3000.00,"credit_amount":0,"category":"Fund Transfer","payee":"SAHARI BIN AHMAD"},
+  {"idx":2,"date":"2023-10-04","description":"TSFR FUND CR-ATM/EFT 696205 3149XXXXXX MAHIRIBU SDN BHD PAYMENT","debit_amount":0,"credit_amount":50000.00,"category":"Credit/Deposit","payee":"MAHIRIBU SDN BHD"},
+  {"idx":3,"date":"2023-10-04","description":"CHQ PROCESS FEE DR 344367","debit_amount":0.50,"credit_amount":0,"category":"Bank Fee","payee":""},
+  {"idx":4,"date":"2023-10-11","description":"DR-ECP 704127 KUMPULAN WANG SIMPANAN PEKERJA","debit_amount":3240.00,"credit_amount":0,"category":"Payment","payee":"KUMPULAN WANG SIMPANAN PEKERJA"}
+]
 
-Correct output:
-  [
-    {"idx":1,"date":"2023-05-02","description":"TSFR FUND CR-ATM/EFT 631597 3149XXXXX MAHIRIBU SDN BHD BUDGET","debit_amount":0,"credit_amount":5000.00,"category":"Credit/Deposit","payee":"MAHIRIBU SDN BHD"},
-    {"idx":2,"date":"2023-05-02","description":"TSFR FUND CR-ATM/EFT 631639 3149XXXXX MAHIRIBU SDN BHD PAYMENT","debit_amount":0,"credit_amount":10000.00,"category":"Credit/Deposit","payee":"MAHIRIBU SDN BHD"},
-    {"idx":3,"date":"2023-05-02","description":"DUITNOW TRSF DR 674679 TAN KHENG KOOI PAYMENT","debit_amount":30000.00,"credit_amount":0,"category":"Fund Transfer","payee":"TAN KHENG KOOI"},
-    {"idx":4,"date":"2023-05-05","description":"TSFR FUND CR-ATM/EFT 388594 3149XXXXX MAHIRIBU SDN BHD MARGIN","debit_amount":0,"credit_amount":12000.00,"category":"Credit/Deposit","payee":"MAHIRIBU SDN BHD"},
-    {"idx":5,"date":"2023-05-05","description":"DUITNOW TRSF DR 410085","debit_amount":2500.00,"credit_amount":0,"category":"Fund Transfer","payee":""}
-  ]
+## CRITICAL RULES
+1. Return EXACTLY the same number of transactions as the input. NO skipping, NO adding.
+2. The IDX in your output MUST match the IDX in the input.
+3. The date, type (debit/credit), and amount MUST match the input exactly.
+4. DEBIT transactions: set debit_amount = input amount, credit_amount = 0
+5. CREDIT transactions: set credit_amount = input amount, debit_amount = 0
+6. Description: use the clean version (strip excessive reference numbers, keep it readable, max 150 chars)
+7. Return ONLY a valid JSON array — no markdown, no code blocks, no explanation text.
 
-## TRANSACTION TYPE IDENTIFIERS
-- "TSFR FUND CR" (including "TSFR FUND CR-ATM/EFT") or "DUITNOW TRSF CR" = CREDIT (money IN) → credit_amount
-- "TSFR FUND DR" or "DUITNOW TRSF DR" or "GIRO PYMT" or "FPX" = DEBIT (money OUT) → debit_amount
-- "DEP-CASH CDT" = Cash deposit CREDIT → credit_amount
-- "CHEQUE PROCESS FEE" = Bank fee DEBIT → debit_amount, category: "Bank Fee"
-- "KUMPULAN WANG SIMPANAN PEKERJA" (EPF), "PERTUBUHAN KESELAMATAN SOSIAL" (SOCSO), "LEMBAGA HASIL DALAM NEGERI" (LHDN) = statutory payments → debit_amount
-- "IBG TRSF" without CR/DR → check context: if amount is in debit column → debit; if credit column → credit
-- "AUTOMATED LOAN PYMT" → DEBIT (loan repayment) → debit_amount, category: "Payment"
-- "DR-ECP" prefix → DEBIT (direct debit for statutory payments like LHDN, EPF, SOCSO)
-- "DEP-ECP" prefix → CREDIT (incoming ECP deposit) → credit_amount, category: "Credit/Deposit"
+## DATE FORMAT
+- Clean format: Convert DD/MM to YYYY-MM-DD using the year from "Statement year:" header.
+- Raw format: Infer year from "Statement Date" or "Tarikh Penyata" in the text.
 
-## RUNNING BALANCE — IGNORE IT
-The 5-digit/6-digit number that appears between the transaction amount and description is the RUNNING BALANCE. It is NOT part of the transaction. Never include it in amounts or description fields.
+## FALLBACK: RAW TEXT PARSING
+If you receive raw statement text (not the clean [IDX] format), parse it using these rules:
+- Lines with DD/MM AMOUNT BALANCE are transaction starts
+- Balance going DOWN = DEBIT, balance going UP = CREDIT
+- CHEQ lines: the amount is the cheque value (could be large). CHQ PROCESS FEE is a separate small fee.
+- NEVER swap amounts between adjacent transactions.
+- NEVER skip credit transactions — they have "CR" or "CDT" in the description.
+- FPX lines with no balance change are NOT transactions — skip them.
+- DEP-CASH, DEP-ECP are CREDITS.
+- DR-ECP is always DEBIT.
+- Extract EVERY transaction visible in the statement — aim for the count mentioned in the summary (e.g., "56 debits, 16 credits").`;
 
-## NUMBER FORMATTING
-Standardize numbers by removing commas. Date format: YYYY-MM-DD (infer year from statement header, e.g., "Statement Date 31 May 2023" → year is 2023).
+// ─── Pre-processor: parse Public Bank raw text into clean structured transactions ───
+// Uses the RUNNING BALANCE as ground truth to determine debit/credit and amounts.
+// Handles the space-joined format from pdf.js where newlines are lost.
+function preprocessPublicBankText(rawText) {
+  // Step 1: Find all DD/MM date markers and their positions
+  const dateMarkers = [];
+  const dateRegex = /\b(\d{2}\/\d{2})\b/g;
+  let dm;
+  while ((dm = dateRegex.exec(rawText)) !== null) {
+    dateMarkers.push({ date: dm[1], pos: dm.index });
+  }
+  if (dateMarkers.length === 0) return null;
 
-## AMOUNT RULE
-Each amount belongs to the transaction it is DIRECTLY on the same line with. Never swap amounts between transactions. Never duplicate amounts.
+  // Step 2: Find all AMOUNT BALANCE pairs (e.g., "3,000.00 21,731.31")
+  const amtBalRegex = /([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\b/g;
+  const allMatches = [];
+  let ab;
+  while ((ab = amtBalRegex.exec(rawText)) !== null) {
+    allMatches.push({
+      amount: parseFloat(ab[1].replace(/,/g, '')),
+      balance: parseFloat(ab[2].replace(/,/g, '')),
+      pos: ab.index,
+      endPos: ab.index + ab[0].length,
+      rawMatch: ab[0],
+    });
+    // Advance past only the first number, so the second number can be
+    // the first number of the next match. This prevents Balance B/F ghosts
+    // from consuming the real transaction's amount.
+    amtBalRegex.lastIndex = ab.index + ab[1].length + 1;
+  }
+  if (allMatches.length === 0) return null;
 
-## SKIP THESE — THEY ARE NOT TRANSACTIONS
-- "Balance From Last Statement", "Balance B/F", "Balance C/F", "Closing Balance", "Baki"
-- "TEGASAN / HIGHLIGHTS", "RINGKASAN / SUMMARY", "Jumlah Debit", "Jumlah Kredit"
-- Repeated page headers: bank names (e.g., "PUBLIC BANK"), branch addresses, account holder names, account numbers — these appear on every page
-- "This is a computer generated statement", "No signature is required"
-- "PeeBee Tip" and any illustrated tip boxes
-- Legal disclaimers, privacy policies, anti-corruption notices (usually on last page)
-- "Page X of Y" or page number indicators
-- Lines with only a running balance number and no transaction description
+  // Step 3: Assign each AMOUNT+BALANCE pair to the nearest preceding DD/MM date
+  // Also extract description between this pair and the next pair (or end)
+  const entries = [];
+  for (let i = 0; i < allMatches.length; i++) {
+    const match = allMatches[i];
+    const nextMatch = allMatches[i + 1];
 
-## OUTPUT FORMAT
-Return a JSON array of objects. Each object MUST have exactly these fields:
-- "idx": Sequential integer starting from 1.
-- "date": YYYY-MM-DD format.
-- "description": Full combined multi-line description (max 100 chars). Include the payee name from continuation lines.
-- "debit_amount": number, 0 if credit. Never negative.
-- "credit_amount": number, 0 if debit. Never negative.
-- "category": "Payment" | "Credit/Deposit" | "Fund Transfer" | "Bank Fee" | "Interest" | "Other"
-- "payee": Person/company name from description. Strip codes and numbers. "" if none.
+    // Find nearest preceding date
+    let dateStr = null;
+    for (let j = dateMarkers.length - 1; j >= 0; j--) {
+      if (dateMarkers[j].pos < match.pos) {
+        dateStr = dateMarkers[j].date;
+        break;
+      }
+    }
+    if (!dateStr) continue;
 
-CRITICAL:
-1. Extract EVERY transaction — no skipping, no summarizing
-2. Each transaction code line = one transaction. Continuation lines = part of the same.
-3. Return ONLY valid JSON array — no markdown, no code blocks
-4. DEBIT transactions are the primary focus — ensure EVERY debit is captured.
-   Double-check that no debit is misclassified as credit.`;
+    // Extract description: text from end of this match to start of next match.
+    // Handle overlapping matches (caused by Balance B/F ghosts): if next match
+    // starts before this one ends, this is a ghost — skip it.
+    const descStart = match.endPos;
+    const descEnd = nextMatch ? nextMatch.pos : rawText.length;
+    if (nextMatch && nextMatch.pos < match.endPos) continue; // overlapping ghost
+    let desc = rawText.substring(descStart, descEnd).trim();
+
+    // Clean up description: remove trailing date markers that belong to next group
+    desc = desc.replace(/\s*\d{2}\/\d{2}\s*$/, '').trim();
+
+    // Skip if description is empty or is a non-transaction header
+    if (!desc || desc.length < 3) continue;
+    if (/^(TEGASAN|RINGKASAN|Jumlah|Baki|This is a computer|No signature|PeeBee|Page \d|PENYATA|Nombor|Jenis|Tarikh|Muka|Dilindungi|Protected|Terima|Thank|Your banking|Anda boleh|You may|PERHATIAN|Dimaklumkan|Please be|sifar|tolerance)/i.test(desc)) continue;
+
+    // CRITICAL: If description starts with a decimal number, the regex mismatched.
+    // This happens when "Balance B/F 10,949.81" is followed by "2,000.00 8,949.81 ..."
+    // The regex pairs B/F amount (10,949.81) with next tx amount (2,000.00) instead of
+    // the real pair (2,000.00 + 8,949.81). Skip — real entry is the next match.
+    if (/^[\d,]+\.\d{2}\b/.test(desc)) continue;
+
+    // CRITICAL: description must contain a transaction code. This filters out
+    // summary numbers (e.g., "12,051.82 414,950.05") that happen to match the regex.
+    const TX_CODES = /\b(TSFR|DUITNOW|GIRO|DR-ECP|DEP-ECP|CHEQ|CHQ|LOAN|AUTOMATED|FPX|IBG|ATM|DEP-CASH|KUMPULAN|PERTUBUHAN|LEMBAGA|MAXIS|MISC)\b/i;
+    if (!TX_CODES.test(desc)) continue;
+
+    entries.push({
+      dateStr,
+      amount: match.amount,
+      balance: match.balance,
+      desc,
+    });
+  }
+
+  if (entries.length < 3) return null;
+
+  // Prepend the "Balance From Last Statement" as reference for first transaction
+  const bflMatch = rawText.match(/Balance\s+From\s+Last\s+Statement\s+([\d,]+\.\d{2})/i);
+  if (bflMatch) {
+    const startingBalance = parseFloat(bflMatch[1].replace(/,/g, ''));
+    // Find the date of the first entry
+    const firstDate = entries[0]?.dateStr || '01/01';
+    entries.unshift({
+      dateStr: firstDate,
+      amount: 0,
+      balance: startingBalance,
+      desc: 'BALANCE_FROM_LAST_STATEMENT',
+      _isReference: true,
+    });
+  }
+
+  // Step 4: Determine DR/CR using balance chain.
+  // Balance BEFORE transaction (prev.balance) → Balance AFTER transaction (cur.balance)
+  // If balance went DOWN → DEBIT. If balance went UP → CREDIT.
+  const transactions = [];
+  for (let i = 0; i < entries.length; i++) {
+    const cur = entries[i];
+    if (cur._isReference) continue;
+    const prev = entries[i - 1]; // balance BEFORE this transaction
+    const descUpper = cur.desc.toUpperCase();
+
+    let type, txAmount;
+
+    if (prev) {
+      const balanceDelta = cur.balance - prev.balance;
+      // balanceDelta < 0 → balance went DOWN → DEBIT
+      // balanceDelta > 0 → balance went UP → CREDIT
+
+      if (balanceDelta < -0.01) {
+        type = 'DEBIT';
+        txAmount = Math.abs(balanceDelta);
+      } else if (balanceDelta > 0.01) {
+        type = 'CREDIT';
+        txAmount = balanceDelta;
+      } else {
+        // Balance unchanged — check description for hints
+        if (/\b(CR|CDT|DEP[- ])/i.test(descUpper)) {
+          type = 'CREDIT';
+          txAmount = cur.amount;
+        } else if (/\b(DR|PYMT|FEE|FPX|GIRO|LOAN|TRSF)\b/i.test(descUpper)) {
+          type = 'DEBIT';
+          txAmount = cur.amount;
+        } else {
+          continue;
+        }
+      }
+    } else {
+      // First entry (no previous balance): trust description keywords
+      if (/\b(CR|CDT|DEP[- ])/i.test(descUpper)) {
+        type = 'CREDIT';
+      } else {
+        type = 'DEBIT';
+      }
+      txAmount = cur.amount;
+    }
+
+    if (txAmount < 0.01) continue;
+
+    transactions.push({
+      idx: transactions.length + 1,
+      dateStr: cur.dateStr,
+      type,
+      amount: parseFloat(txAmount.toFixed(2)),
+      rawDescription: cur.desc,
+    });
+  }
+
+  return transactions.length >= 3 ? transactions : null;
+}
+
+// ─── Merge pre-processed amounts/dates with AI categories/payees ───
+function mergePreprocessedWithAI(preprocessed, aiTransactions, rawText) {
+  // Extract year from raw text
+  const yearHint = rawText.match(/(?:Statement Date|Tarikh Penyata).*?(\d{4})/);
+  const year = yearHint ? yearHint[1] : new Date().getFullYear().toString();
+
+  // Build a map of AI results by idx
+  const aiMap = new Map();
+  if (Array.isArray(aiTransactions)) {
+    for (const aiTx of aiTransactions) {
+      const idx = aiTx.idx;
+      if (idx != null) aiMap.set(idx, aiTx);
+    }
+  }
+
+  // Merge: pre-processed data provides authoritative amounts, AI provides categories and payees
+  const merged = [];
+  for (const ppTx of preprocessed) {
+    const aiTx = aiMap.get(ppTx.idx);
+
+    // Convert DD/MM to YYYY-MM-DD
+    const [day, month] = ppTx.dateStr.split('/');
+    const date = `${year}-${month}-${day}`;
+
+    const isDebit = ppTx.type === 'DEBIT';
+    const debitAmount = isDebit ? ppTx.amount : 0;
+    const creditAmount = isDebit ? 0 : ppTx.amount;
+
+    // Use AI category and payee if available, otherwise compute defaults
+    const category = (aiTx && aiTx.category)
+      ? aiTx.category
+      : guessCategory(ppTx.rawDescription);
+
+    const payee = (aiTx && aiTx.payee != null)
+      ? aiTx.payee
+      : cleanPayeeName(ppTx.rawDescription);
+
+    // Use AI description if available and not empty, otherwise use raw description
+    const aiDesc = (aiTx && aiTx.description) ? aiTx.description : '';
+    const description = aiDesc || ppTx.rawDescription.slice(0, 150);
+
+    merged.push({
+      idx: ppTx.idx,
+      date,
+      description,
+      debit_amount: parseFloat(debitAmount.toFixed(2)),
+      credit_amount: parseFloat(creditAmount.toFixed(2)),
+      category: category || (isDebit ? 'Payment' : 'Credit/Deposit'),
+      payee: payee || '',
+      particulars: isDebit ? 'Payment' : 'Deposit',
+    });
+  }
+
+  return merged;
+}
 
 // ─── Post-extraction validator: cross-check DR/CR/CDT against amounts ───
 function validateAndCorrect(transactions, rawText) {
@@ -669,27 +882,50 @@ export async function onRequest(context) {
       }
     } else {
       // ─── AI-powered PDF extraction ───
-      // provider: 'deepseek' | 'gemini' (default: deepseek)
       const selectedProvider = (preferredProvider || 'deepseek').toLowerCase();
 
+      // Try pre-processor for amount accuracy; fall back to raw text if it fails
+      const preprocessed = preprocessPublicBankText(pdfText);
+      let usePreprocessor = false;
+      let aiPromptText = pdfText;
+
+      if (preprocessed && preprocessed.length >= 5) {
+        usePreprocessor = true;
+        const yearHint = pdfText.match(/(?:Statement Date|Tarikh Penyata).*?(\d{4})/);
+        const year = yearHint ? yearHint[1] : (new Date().getFullYear().toString());
+
+        const cleanLines = preprocessed.map(tx =>
+          `[${tx.idx}] ${tx.dateStr} | ${tx.type} | ${tx.amount.toFixed(2)} | ${tx.rawDescription}`
+        ).join('\n');
+
+        aiPromptText = `Statement year: ${year}\n\nTransactions to categorize (${preprocessed.length} total):\n${cleanLines}`;
+      }
+
+      // Call AI with full SYSTEM_PROMPT (handles both clean and raw formats)
       if (selectedProvider === 'deepseek') {
-        if (!env.DEEPSEEK_API_KEY) {
-          return Response.json({ error: 'DEEPSEEK_API_KEY not configured' }, { status: 500 });
-        }
-        const result = await callDeepSeek(env.DEEPSEEK_API_KEY, pdfText);
+        const deepseekKey = env.DEEPSEEK_API_KEY;
+        if (!deepseekKey) return Response.json({ error: 'DEEPSEEK_API_KEY not configured' }, { status: 500 });
+        const result = await callDeepSeek(deepseekKey, aiPromptText);
         provider = 'deepseek';
         transactions = result.transactions;
       } else {
         if (!env.GEMINI_API_KEY) {
           return Response.json({ error: 'GEMINI_API_KEY not configured' }, { status: 500 });
         }
-        const result = await callGemini(env.GEMINI_API_KEY, pdfText);
+        const geminiKey = env.GEMINI_API_KEY;
+        const result = await callGemini(geminiKey, aiPromptText);
         provider = 'gemini';
         transactions = result.transactions;
       }
 
-      transactions.sort((a, b) => (a.idx || 0) - (b.idx || 0));
-      corrections = validateAndCorrect(transactions, pdfText);
+      // Layer 2: Merge pre-processed amounts with AI categories/payees
+      if (usePreprocessor) {
+        transactions = mergePreprocessedWithAI(preprocessed, transactions, pdfText);
+        corrections = []; // pre-processor already handles amount accuracy
+      } else {
+        transactions.sort((a, b) => (a.idx || 0) - (b.idx || 0));
+        corrections = validateAndCorrect(transactions, pdfText);
+      }
     }
 
     // Insert into DB (no balance column)

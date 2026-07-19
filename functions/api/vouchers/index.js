@@ -10,17 +10,37 @@ export async function onRequest(context) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     if (request.method === 'GET') {
+      const search = url.searchParams.get('search')?.trim();
+
       let query = `SELECT pv.*, c.name as company_name
                    FROM payment_vouchers pv
                    JOIN companies c ON c.id = pv.company_id`;
       const params = [];
+      const conditions = [];
 
       if (companyId) {
-        query += ' WHERE pv.company_id = ?';
+        conditions.push('pv.company_id = ?');
         params.push(companyId);
       }
 
+      if (search) {
+        const like = `%${search}%`;
+        conditions.push(
+          `(pv.payee LIKE ? OR pv.voucher_number LIKE ? OR pv.description LIKE ? OR pv.invoice_ref LIKE ? OR pv.category LIKE ? OR pv.payment_method LIKE ? OR pv.notes LIKE ? OR c.name LIKE ?)`
+        );
+        params.push(like, like, like, like, like, like, like, like);
+      }
+
+      if (conditions.length) {
+        query += ' WHERE ' + conditions.join(' AND ');
+      }
+
       query += ' ORDER BY pv.created_at DESC';
+
+      // Limit search results to keep it snappy
+      if (search) {
+        query += ' LIMIT 50';
+      }
 
       const { results } = await env.DB.prepare(query).bind(...params).all();
       return Response.json(results);

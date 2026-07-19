@@ -88,6 +88,12 @@ export const api = {
 
   // Vouchers
   getVouchers: (companyId) => request(`/vouchers${companyId ? `?company_id=${companyId}` : ''}`),
+  searchVouchers: (companyId, query) => {
+    const params = new URLSearchParams();
+    if (companyId) params.set('company_id', companyId);
+    params.set('search', query);
+    return request(`/vouchers?${params.toString()}`);
+  },
   getVoucher: (id) => request(`/vouchers/${id}`),
   createVoucher: (data) => request('/vouchers', { method: 'POST', body: JSON.stringify(data) }),
   updateVoucher: (id, data) => request(`/vouchers/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
@@ -109,5 +115,8 @@ export const api = {
   }),
   mergePayees: (from, to) => request('/payees', {
     method: 'POST', body: JSON.stringify({ from, to }),
+  }),
+  batchMergePayees: (merges) => request('/payees', {
+    method: 'POST', body: JSON.stringify({ merges }),
   }),
 };

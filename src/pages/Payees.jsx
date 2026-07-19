@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Search, Pencil, Check, X, Users, Square, CheckSquare, Merge, Sparkles } from 'lucide-react';
+import { Search, Pencil, Check, X, Users, Square, CheckSquare, Merge, Sparkles, Circle } from 'lucide-react';
 import { api } from '../utils/api';
 import { useCompany } from '../contexts/CompanyContext';
 import ConfirmModal from '../components/ui/ConfirmModal';
@@ -19,6 +19,13 @@ export default function Payees() {
   const [confirm, setConfirm] = useState(null);
   const [selected, setSelected] = useState(new Set());
   const [mergeTarget, setMergeTarget] = useState(null);
+
+  // Batch duplicate groups: { variants: string[], selected: string }
+  const [duplicateGroups, setDuplicateGroups] = useState(null);
+
+  // Bulk edit mode: edits all names at once
+  const [bulkEditMode, setBulkEditMode] = useState(false);
+  const [bulkEdits, setBulkEdits] = useState({});
 
   useEffect(() => {
     if (selectedCompanyId) loadPayees();
@@ -79,15 +86,15 @@ export default function Payees() {
       normMap.get(norm).push(p.payee);
     }
 
-    // Build duplicate groups
-    const groups = [];
+    // Build raw groups
+    const rawGroups = [];
 
-    // Step 1: groups from exact normalization matches (e.g. dot differences)
+    // Step 1: exact normalization matches (e.g., dot differences)
     for (const [, group] of normMap) {
-      if (group.length >= 2) groups.push([...group]);
+      if (group.length >= 2) rawGroups.push([...group]);
     }
 
-    // Step 2: substring matches (e.g. truncation)
+    // Step 2: substring matches (e.g., truncation)
     const norms = [...normMap.keys()];
     for (let i = 0; i < norms.length; i++) {
       for (let j = i + 1; j < norms.length; j++) {
@@ -95,34 +102,100 @@ export default function Payees() {
         const shorter = norms[i].length > norms[j].length ? norms[j] : norms[i];
         if (shorter.length >= 4 && longer.includes(shorter) && shorter.length / longer.length >= 0.6) {
           const all = [...new Set([...normMap.get(norms[i]), ...normMap.get(norms[j])])];
-          if (all.length >= 2) groups.push(all);
+          if (all.length >= 2) rawGroups.push(all);
         }
       }
     }
 
-    // Deduplicate — each name in only one group, keep largest groups first
+    // Deduplicate: each name in only one group, largest groups first
     const used = new Set();
-    const finalNames = [];
-    groups.sort((a, b) => b.length - a.length);
-    for (const g of groups) {
+    const finalGroups = [];
+    rawGroups.sort((a, b) => b.length - a.length);
+    for (const g of rawGroups) {
       const fresh = g.filter(n => !used.has(n));
       if (fresh.length >= 2) {
-        finalNames.push(...fresh);
+        // Pick the variant with most transactions as default selection
+        const withCounts = fresh.map(name => {
+          const p = payees.find(x => x.payee === name);
+          return { name, txCount: p?.tx_count || 0, stmtCount: p?.stmt_count || 0 };
+        });
+        withCounts.sort((a, b) => b.txCount - a.txCount);
+        finalGroups.push({
+          variants: withCounts,
+          selected: withCounts[0].name, // default: highest tx count
+        });
         fresh.forEach(n => used.add(n));
       }
     }
 
-    if (finalNames.length === 0) {
+    if (finalGroups.length === 0) {
       setStatus({ type: 'success', message: 'No duplicates found.' });
       setTimeout(() => setStatus(null), 3000);
       return;
     }
 
-    setSelected(new Set(finalNames));
+    setDuplicateGroups(finalGroups);
+    setSelected(new Set());
     setMergeTarget(null);
 
-    const groupCount = groups.filter(g => g.filter(n => finalNames.includes(n)).length >= 2).length;
-    setStatus({ type: 'success', message: `Found ${finalNames.length} payees in ${groupCount} duplicate group(s). Select two and click Merge.` });
+    const totalDupes = finalGroups.reduce((s, g) => s + g.variants.length - 1, 0);
+    setStatus({ type: 'success', message: `Found ${finalGroups.length} duplicate group(s) with ${totalDupes} redundant names. Pick the canonical name for each and save.` });
+  }
+
+  function handleGroupSelect(groupIndex, selectedName) {
+    setDuplicateGroups(prev => {
+      const next = [...prev];
+      next[groupIndex] = { ...next[groupIndex], selected: selectedName };
+      return next;
+    });
+  }
+
+  function handleClearDuplicates() {
+    setDuplicateGroups(null);
+    setStatus(null);
+  }
+
+  async function handleBatchMerge() {
+    if (!duplicateGroups) return;
+
+    const merges = duplicateGroups
+      .map(g => ({
+        from: g.variants.map(v => v.name),
+        to: g.selected,
+      }))
+      .filter(m => m.from.length >= 2);
+
+    if (merges.length === 0) return;
+
+    const totalAffected = merges.reduce((s, m) => {
+      const others = m.from.filter(n => n !== m.to);
+      return s + others.reduce((sum, name) => {
+        const p = payees.find(x => x.payee === name);
+        return sum + (p?.tx_count || 0);
+      }, 0);
+    }, 0);
+
+    setConfirm({
+      title: 'Merge All Duplicates',
+      message: `Merge ${merges.reduce((s, m) => s + m.from.length - 1, 0)} redundant payee names across ${merges.length} groups? This will update ${totalAffected} transaction(s).`,
+      variant: 'default',
+      confirmLabel: `Save All (${merges.length} groups)`,
+      onConfirm: async () => {
+        setSaving(true);
+        setConfirm(null);
+        try {
+          const result = await api.batchMergePayees(merges);
+          setStatus({ type: 'success', message: `${result.totalUpdated} transaction(s) updated across ${result.merges.length} groups.` });
+          setDuplicateGroups(null);
+          await loadPayees();
+          setTimeout(() => setStatus(null), 4000);
+        } catch (err) {
+          setStatus({ type: 'error', message: err.message });
+        } finally {
+          setSaving(false);
+        }
+      },
+    });
   }
 
   function startEdit(payee) {
@@ -200,6 +273,57 @@ export default function Payees() {
 
   const allSelected = filtered.length > 0 && selected.size === filtered.length;
 
+  // ─── Bulk edit ───
+  function enterBulkEdit() {
+    setBulkEditMode(true);
+    setBulkEdits({});
+    setEditingId(null);
+  }
+
+  function cancelBulkEdit() {
+    setBulkEditMode(false);
+    setBulkEdits({});
+  }
+
+  function handleBulkChange(payeeName, value) {
+    setBulkEdits(prev => ({ ...prev, [payeeName]: value }));
+  }
+
+  async function handleBulkSave() {
+    const changes = Object.entries(bulkEdits).filter(([oldName, newName]) =>
+      newName.trim() && newName.trim() !== oldName
+    );
+    if (changes.length === 0) { cancelBulkEdit(); return; }
+
+    setConfirm({
+      title: 'Save Name Changes',
+      message: `Update ${changes.length} payee name(s)? This will affect all associated transactions.`,
+      variant: 'default',
+      confirmLabel: `Save ${changes.length} change(s)`,
+      onConfirm: async () => {
+        setSaving(true);
+        setConfirm(null);
+        try {
+          let total = 0;
+          for (const [oldName, newName] of changes) {
+            const result = await api.renamePayee(oldName, newName.trim());
+            total += result.updated;
+          }
+          setStatus({ type: 'success', message: `${total} transaction(s) updated across ${changes.length} payees.` });
+          cancelBulkEdit();
+          await loadPayees();
+          setTimeout(() => setStatus(null), 4000);
+        } catch (err) {
+          setStatus({ type: 'error', message: err.message });
+        } finally {
+          setSaving(false);
+        }
+      },
+    });
+  }
+
+  const bulkEditCount = Object.values(bulkEdits).filter(v => v && v.trim()).length;
+
   if (loading) return <LoadingSpinner />;
 
   return (
@@ -218,6 +342,72 @@ export default function Payees() {
           'bg-red-50 text-red-700 border border-red-200'
         }`}>
           {status.message}
+        </div>
+      )}
+
+      {/* Duplicate groups — batch merge UI */}
+      {duplicateGroups && duplicateGroups.length > 0 && (
+        <div className="mb-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-zinc-700">
+              {duplicateGroups.length} duplicate group{duplicateGroups.length > 1 ? 's' : ''} found
+            </h2>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleClearDuplicates}
+                className="border border-zinc-300 bg-transparent text-zinc-500 rounded-lg px-3 py-1.5 text-xs hover:bg-zinc-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBatchMerge}
+                disabled={saving}
+                className="bg-zinc-800 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+              >
+                {saving ? 'Saving...' : `Save All (${duplicateGroups.length} groups)`}
+              </button>
+            </div>
+          </div>
+
+          {duplicateGroups.map((group, gi) => (
+            <div key={gi} className="card border border-zinc-200">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Group {gi + 1}</span>
+                <span className="text-xs text-zinc-400">·</span>
+                <span className="text-xs text-zinc-400">{group.variants.length} variants</span>
+              </div>
+              <div className="space-y-1.5">
+                {group.variants.map((v) => {
+                  const isSelected = group.selected === v.name;
+                  return (
+                    <button
+                      key={v.name}
+                      onClick={() => handleGroupSelect(gi, v.name)}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${
+                        isSelected
+                          ? 'bg-zinc-100 border border-zinc-300'
+                          : 'border border-transparent hover:bg-zinc-50'
+                      }`}
+                    >
+                      <Circle
+                        className={`w-4 h-4 flex-shrink-0 ${isSelected ? 'text-zinc-700 fill-zinc-700' : 'text-zinc-300'}`}
+                        strokeWidth={1.5}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <span className={`text-sm ${isSelected ? 'text-zinc-900 font-medium' : 'text-zinc-600'}`}>
+                          {v.name}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 flex-shrink-0">
+                        <span className="text-xs text-zinc-400 tabular-nums">{v.txCount} tx</span>
+                        <span className="text-xs text-zinc-400 tabular-nums">{v.stmtCount} mo</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -242,6 +432,32 @@ export default function Payees() {
               <Sparkles className="w-3.5 h-3.5" strokeWidth={1.5} />
               Find Duplicates
             </button>
+            {bulkEditMode ? (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={cancelBulkEdit}
+                  className="border border-zinc-300 bg-transparent text-zinc-500 rounded-lg px-3 py-1.5 text-xs hover:bg-zinc-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleBulkSave}
+                  disabled={bulkEditCount === 0}
+                  className="bg-zinc-800 text-white rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+                >
+                  Save All{bulkEditCount > 0 ? ` (${bulkEditCount})` : ''}
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={enterBulkEdit}
+                className="border border-zinc-300 bg-transparent text-zinc-700 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-zinc-50 transition-colors flex items-center gap-1.5"
+                title="Edit all payee names at once"
+              >
+                <Pencil className="w-3.5 h-3.5" strokeWidth={1.5} />
+                Edit All
+              </button>
+            )}
             {selectedList.length >= 2 && (
               <div className="flex items-center gap-2">
                 <span className="text-xs text-zinc-500">{selectedList.length} selected</span>
@@ -327,7 +543,7 @@ export default function Payees() {
                   const isEditing = editingId === p.payee;
                   const isSelected = selected.has(p.payee);
                   return (
-                    <tr key={p.payee} className={`hover:bg-zinc-50 transition-colors ${isEditing ? 'bg-zinc-50' : ''} ${isSelected ? 'bg-zinc-50' : ''}`}>
+                    <tr key={p.payee} className={`hover:bg-zinc-50 transition-colors ${bulkEditMode ? 'bg-zinc-50/50' : ''} ${isEditing ? 'bg-zinc-50' : ''} ${isSelected ? 'bg-zinc-50' : ''}`}>
                       <td className="px-3 py-2.5">
                         <button onClick={() => toggleSelect(p.payee)} className="text-zinc-400 hover:text-zinc-700 transition-colors">
                           {isSelected ? (
@@ -338,7 +554,16 @@ export default function Payees() {
                         </button>
                       </td>
                       <td className="px-4 py-2.5">
-                        {isEditing ? (
+                        {bulkEditMode ? (
+                          <input
+                            className="input py-1 px-2 text-sm w-full"
+                            value={bulkEdits[p.payee] ?? p.payee}
+                            onChange={(e) => handleBulkChange(p.payee, e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Escape') cancelBulkEdit();
+                            }}
+                          />
+                        ) : isEditing ? (
                           <input
                             className="input py-1 px-2 text-sm w-full"
                             value={editValue}
@@ -380,6 +605,8 @@ export default function Payees() {
                               <X className="w-4 h-4" strokeWidth={1.5} />
                             </button>
                           </div>
+                        ) : bulkEditMode ? (
+                          <span className="text-xs text-zinc-400">editing...</span>
                         ) : (
                           <button
                             onClick={() => startEdit(p)}

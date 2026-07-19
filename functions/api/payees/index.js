@@ -45,7 +45,34 @@ export async function onRequest(context) {
     }
 
     if (request.method === 'POST') {
-      const { from, to } = await request.json();
+      const body = await request.json();
+
+      // Batch merge: { merges: [{ from: [...], to: "canonical" }, ...] }
+      if (body.merges && Array.isArray(body.merges)) {
+        let totalUpdated = 0;
+        const results = [];
+
+        for (const { from, to } of body.merges) {
+          if (!Array.isArray(from) || from.length < 2 || !to) continue;
+          if (!from.includes(to)) continue;
+
+          const others = from.filter(p => p !== to);
+          const placeholders = others.map(() => '?').join(',');
+          const params = [to, ...others];
+
+          const { meta } = await env.DB.prepare(
+            `UPDATE transactions SET payee = ?, is_edited = 1 WHERE payee IN (${placeholders})`
+          ).bind(...params).run();
+
+          totalUpdated += meta.changes;
+          results.push({ merged: others, into: to, updated: meta.changes });
+        }
+
+        return Response.json({ totalUpdated, merges: results });
+      }
+
+      // Single merge: { from: [...], to: "canonical" }
+      const { from, to } = body;
       if (!Array.isArray(from) || from.length < 2 || !to) {
         return Response.json({ error: 'from (array of 2+ payees) and to (target payee) required' }, { status: 400 });
       }
