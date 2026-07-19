@@ -3,7 +3,7 @@ import { useNavigate, NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Upload, Table2, FileText, Building2,
   Palette, Settings, ChevronLeft, ChevronRight, Vault,
-  Plus, Check, ChevronDown
+  Plus, Check, ChevronDown, Users
 } from 'lucide-react';
 import { useClerk, useUser } from '@clerk/clerk-react';
 import { useCompany } from '../../contexts/CompanyContext';
@@ -15,6 +15,7 @@ const navItems = [
   { to: '/vouchers', icon: FileText, label: 'Payment Vouchers' },
   { to: '/companies', icon: Building2, label: 'Companies' },
   { to: '/templates', icon: Palette, label: 'Templates' },
+  { to: '/payees', icon: Users, label: 'Payees' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 

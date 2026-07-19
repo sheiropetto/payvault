@@ -101,4 +101,10 @@ export const api = {
   getAuthorizedUsers: () => request('/auth/users'),
   addAuthorizedUser: (data) => request('/auth/users', { method: 'POST', body: JSON.stringify(data) }),
   removeAuthorizedUser: (email) => request(`/auth/users?email=${encodeURIComponent(email)}`, { method: 'DELETE' }),
+
+  // Payees
+  getPayees: (companyId) => request(`/payees?company_id=${companyId}`),
+  renamePayee: (oldPayee, newPayee) => request('/payees', {
+    method: 'PATCH', body: JSON.stringify({ oldPayee, newPayee }),
+  }),
 };
