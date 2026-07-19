@@ -218,6 +218,159 @@ async function callGemini(apiKey, pdfText) {
   return { transactions, provider: 'gemini', usage: data.usageMetadata };
 }
 
+// ─── Programmatic CSV parsing helpers ───
+function parseCSV(text) {
+  const lines = [];
+  let row = [""];
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    const next = text[i + 1];
+
+    if (c === '"') {
+      if (inQuotes && next === '"') {
+        row[row.length - 1] += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (c === ',' && !inQuotes) {
+      row.push('');
+    } else if ((c === '\r' || c === '\n') && !inQuotes) {
+      if (c === '\r' && next === '\n') {
+        i++;
+      }
+      lines.push(row);
+      row = [""];
+    } else {
+      row[row.length - 1] += c;
+    }
+  }
+  if (row.length > 1 || row[0] !== '') {
+    lines.push(row);
+  }
+  return lines;
+}
+
+function normalizeDate(rawDate) {
+  if (!rawDate) return null;
+  const cleaned = rawDate.replace(/['"]+/g, '').trim();
+  if (!cleaned) return null;
+
+  // Try standard YYYY-MM-DD or YYYY/MM/DD
+  let match = cleaned.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (match) {
+    return `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+  }
+
+  // Try DD/MM/YYYY or DD-MM-YYYY
+  match = cleaned.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (match) {
+    return `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
+  }
+
+  // Try DD/MM/YY or DD-MM-YY (e.g. 23/05/23)
+  match = cleaned.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2})$/);
+  if (match) {
+    const year = parseInt(match[3]) < 50 ? `20${match[3]}` : `19${match[3]}`;
+    return `${year}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
+  }
+
+  // Try DD MMM YYYY or DD-MMM-YY (e.g., "15 Jul 2023", "15-Jul-23", "15 July 2023")
+  const months = {
+    jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+    jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+    january: '01', february: '02', march: '03', april: '04', june: '06',
+    july: '07', august: '08', september: '09', october: '10', november: '11', december: '12'
+  };
+  const parts = cleaned.split(/[\s\-_]+/);
+  if (parts.length >= 3) {
+    const day = parts[0].replace(/\D/g, '');
+    const monStr = parts[1].toLowerCase();
+    let yearStr = parts[2].replace(/\D/g, '');
+
+    if (day && months[monStr] && yearStr) {
+      if (yearStr.length === 2) {
+        yearStr = parseInt(yearStr) < 50 ? `20${yearStr}` : `19${yearStr}`;
+      }
+      return `${yearStr}-${months[monStr]}-${day.padStart(2, '0')}`;
+    }
+  }
+
+  const d = new Date(cleaned);
+  if (!isNaN(d.getTime())) {
+    return d.toISOString().split('T')[0];
+  }
+
+  return null;
+}
+
+function parseAmount(val) {
+  if (!val) return 0;
+  let cleaned = val.replace(/[^0-9.\-()]/g, '').trim();
+  if (!cleaned) return 0;
+
+  if (cleaned.startsWith('(') && cleaned.endsWith(')')) {
+    cleaned = '-' + cleaned.slice(1, -1);
+  }
+  const num = parseFloat(cleaned);
+  return isNaN(num) ? 0 : num;
+}
+
+function findHeaderAndMap(rows) {
+  const dateKeywords = ['date', 'tarikh', 'value date', 'trn date', 'posting date'];
+  const descKeywords = ['description', 'particulars', 'transaction description', 'details', 'transaction details', 'remarks', 'butiran'];
+  const debitKeywords = ['debit', 'withdrawal', 'amount out', 'out', 'payment', 'charges'];
+  const creditKeywords = ['credit', 'deposit', 'amount in', 'in', 'received'];
+  const amountKeywords = ['amount', 'amount (rm)', 'jumlah', 'transaction amount'];
+
+  for (let r = 0; r < Math.min(rows.length, 15); r++) {
+    const row = rows[r].map(c => c.trim().toLowerCase());
+    
+    let dateIdx = -1;
+    let descIdx = -1;
+    let debitIdx = -1;
+    let creditIdx = -1;
+    let amountIdx = -1;
+
+    for (let c = 0; c < row.length; c++) {
+      const cell = row[c];
+      if (!cell) continue;
+
+      if (dateIdx === -1 && dateKeywords.some(kw => cell.includes(kw))) dateIdx = c;
+      else if (descIdx === -1 && descKeywords.some(kw => cell.includes(kw))) descIdx = c;
+      else if (debitIdx === -1 && debitKeywords.some(kw => cell.includes(kw))) debitIdx = c;
+      else if (creditIdx === -1 && creditKeywords.some(kw => cell.includes(kw))) creditIdx = c;
+      else if (amountIdx === -1 && amountKeywords.some(kw => cell.includes(kw))) amountIdx = c;
+    }
+
+    if (dateIdx !== -1 && descIdx !== -1 && (amountIdx !== -1 || debitIdx !== -1 || creditIdx !== -1)) {
+      return {
+        headerRowIndex: r,
+        mapping: { dateIdx, descIdx, debitIdx, creditIdx, amountIdx }
+      };
+    }
+  }
+  return null;
+}
+
+function cleanPayeeName(desc) {
+  if (!desc) return '';
+  let cleaned = desc.toUpperCase();
+  const prefixesToRemove = [
+    /\b(TSFR|FUND|CR|DR|DUITNOW|TRSF|GIRO|PYMT|FPX|DEP-CASH|CDT|IBG|ATM|CASH)\b/g,
+    /\b(ATM-EFT|PROCESS|FEE|LEMBAGA|HASIL|DALAM|NEGERI)\b/g,
+    /\d{5,}/g,
+    /[^A-Z0-9\s]/g
+  ];
+  for (const pattern of prefixesToRemove) {
+    cleaned = cleaned.replace(pattern, ' ');
+  }
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  return cleaned.slice(0, 50).trim();
+}
+
 // ─── Main handler ───
 export async function onRequest(context) {
   const { request, env } = context;
@@ -269,46 +422,107 @@ export async function onRequest(context) {
       ).bind(statement_id).run();
     }
 
-    let pdfText = text;
+    let csvText = '';
+    let pdfText = '';
 
-    // If no text provided, try loading from storage
-    if (!pdfText) {
+    if (stmt.file_type === 'csv') {
       const fileObj = await env.STORAGE.get(stmt.file_url);
       if (!fileObj) {
         await env.DB.prepare("UPDATE bank_statements SET status = 'error' WHERE id = ?").bind(statement_id).run();
         return Response.json({ error: 'File not found in storage' }, { status: 404 });
       }
-
       const fileBuffer = await fileObj.arrayBuffer();
       const fileBytes = new Uint8Array(fileBuffer);
       const decoder = new TextDecoder('utf-8', { fatal: false });
-      let raw = decoder.decode(fileBytes);
-      const textParts = [];
-      const btMatches = raw.match(/\(([^)]*)\)/g) || [];
-      for (const m of btMatches) {
-        const cleaned = m.slice(1, -1).replace(/\\([0-9]{3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8))).replace(/\\(.)/g, '$1').replace(/%20/g, ' ').trim();
-        if (cleaned.length > 1) textParts.push(cleaned);
-      }
-      pdfText = textParts.join('\n');
-      if (!pdfText || pdfText.length < 50) {
-        pdfText = raw.replace(/[^\x20-\x7E\n\r\t\u00A0-\uFFFF]/g, ' ').replace(/\s{3,}/g, '\n');
+      csvText = decoder.decode(fileBytes);
+    } else {
+      pdfText = text;
+      // If no text provided, try loading from storage
+      if (!pdfText) {
+        const fileObj = await env.STORAGE.get(stmt.file_url);
+        if (!fileObj) {
+          await env.DB.prepare("UPDATE bank_statements SET status = 'error' WHERE id = ?").bind(statement_id).run();
+          return Response.json({ error: 'File not found in storage' }, { status: 404 });
+        }
+
+        const fileBuffer = await fileObj.arrayBuffer();
+        const fileBytes = new Uint8Array(fileBuffer);
+        const decoder = new TextDecoder('utf-8', { fatal: false });
+        let raw = decoder.decode(fileBytes);
+        const textParts = [];
+        const btMatches = raw.match(/\(([^)]*)\)/g) || [];
+        for (const m of btMatches) {
+          const cleaned = m.slice(1, -1).replace(/\\([0-9]{3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8))).replace(/\\(.)/g, '$1').replace(/%20/g, ' ').trim();
+          if (cleaned.length > 1) textParts.push(cleaned);
+        }
+        pdfText = textParts.join('\n');
+        if (!pdfText || pdfText.length < 50) {
+          pdfText = raw.replace(/[^\x20-\x7E\n\r\t\u00A0-\uFFFF]/g, ' ').replace(/\s{3,}/g, '\n');
+        }
       }
     }
 
-    // ─── Use Gemini API ───
-    if (!env.GEMINI_API_KEY) {
-      return Response.json({ error: 'GEMINI_API_KEY not configured' }, { status: 500 });
+    let transactions = [];
+    let provider = 'system';
+    let corrections = [];
+
+    if (stmt.file_type === 'csv') {
+      const rows = parseCSV(csvText);
+      const headerInfo = findHeaderAndMap(rows);
+      if (!headerInfo) {
+        throw new Error('Could not identify a valid transaction table header in the CSV. Make sure the CSV contains Date, Description, and Amount/Debit/Credit columns.');
+      }
+
+      const { headerRowIndex, mapping } = headerInfo;
+      const { dateIdx, descIdx, debitIdx, creditIdx, amountIdx } = mapping;
+
+      for (let i = headerRowIndex + 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (row.length <= Math.max(dateIdx, descIdx)) continue;
+
+        const rawDate = row[dateIdx];
+        const normalized = normalizeDate(rawDate);
+        if (!normalized) continue; // skip rows without a valid date (like spacer/total rows)
+
+        const description = (row[descIdx] || '').trim();
+        if (!description) continue; // skip empty transactions
+
+        let debit_amount = 0;
+        let credit_amount = 0;
+
+        if (debitIdx !== -1 || creditIdx !== -1) {
+          debit_amount = debitIdx !== -1 ? parseAmount(row[debitIdx]) : 0;
+          credit_amount = creditIdx !== -1 ? parseAmount(row[creditIdx]) : 0;
+        } else if (amountIdx !== -1) {
+          const amt = parseAmount(row[amountIdx]);
+          if (amt < 0) {
+            debit_amount = Math.abs(amt);
+          } else {
+            credit_amount = amt;
+          }
+        }
+
+        transactions.push({
+          idx: transactions.length + 1,
+          date: normalized,
+          description: description.slice(0, 100),
+          debit_amount,
+          credit_amount,
+          category: guessCategory(description),
+          payee: cleanPayeeName(description)
+        });
+      }
+    } else {
+      // ─── Use Gemini API ───
+      if (!env.GEMINI_API_KEY) {
+        return Response.json({ error: 'GEMINI_API_KEY not configured' }, { status: 500 });
+      }
+      const result = await callGemini(env.GEMINI_API_KEY, pdfText);
+      provider = 'gemini';
+      transactions = result.transactions;
+      transactions.sort((a, b) => (a.idx || 0) - (b.idx || 0));
+      corrections = validateAndCorrect(transactions, pdfText);
     }
-    const result = await callGemini(env.GEMINI_API_KEY, pdfText);
-    const provider = 'gemini';
-
-    const { transactions } = result;
-
-    // Sort by idx
-    transactions.sort((a, b) => (a.idx || 0) - (b.idx || 0));
-
-    // ─── Post-extraction validation: cross-check DR/CR/CDT against raw text ───
-    const corrections = validateAndCorrect(transactions, pdfText);
 
     // Insert into DB (no balance column)
     const insertStmt = env.DB.prepare(
@@ -357,9 +571,11 @@ export async function onRequest(context) {
         total_inserted: insertedCount,
         corrections: corrections.length,
         correction_details: corrections,
-        message: corrections.length > 0
-          ? `[${provider}] Extracted ${insertedCount} transactions · Auto-corrected ${corrections.length} amount(s)`
-          : `[${provider}] Successfully extracted ${insertedCount} transactions`,
+        message: stmt.file_type === 'csv'
+          ? `[System] Programmatically extracted ${insertedCount} transactions`
+          : corrections.length > 0
+            ? `[${provider}] Extracted ${insertedCount} transactions · Auto-corrected ${corrections.length} amount(s)`
+            : `[${provider}] Successfully extracted ${insertedCount} transactions`,
       });
     } else {
       return Response.json({
@@ -368,7 +584,9 @@ export async function onRequest(context) {
         total_extracted: transactions.length,
         total_inserted: insertedCount,
         corrections: corrections.length,
-        message: `[${provider}] Extracted chunk ${chunk_index + 1} of ${total_chunks}`,
+        message: stmt.file_type === 'csv'
+          ? `[System] Extracted chunk ${chunk_index + 1} of ${total_chunks}`
+          : `[${provider}] Extracted chunk ${chunk_index + 1} of ${total_chunks}`,
       });
     }
 

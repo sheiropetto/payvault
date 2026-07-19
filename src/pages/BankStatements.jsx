@@ -119,22 +119,22 @@ export default function BankStatements() {
           }
           setExtractStep('saving');
           if (lastResult) {
-            setStatusMsg({ type: 'success', text: `[Gemini] ${lastResult.message}` });
+            setStatusMsg({ type: 'success', text: lastResult.message });
           }
         } else {
           throw new Error('No text found in PDF');
         }
       } else {
-        setExtractStep('ai-call');
+        setExtractStep('csv-extract');
         const result = await api.extractTransactions(stmt.id, '');
         setExtractStep('saving');
-        setStatusMsg({ type: 'success', text: `[Gemini] ${result.message}` });
+        setStatusMsg({ type: 'success', text: result.message });
       }
       await loadData();
       setTimeout(() => setStatusMsg(null), 5000);
     } catch (err) {
       console.error(err);
-      setStatusMsg({ type: 'error', text: `[Gemini] ${err.message}` });
+      setStatusMsg({ type: 'error', text: stmt.file_type === 'pdf' ? `[Gemini] ${err.message}` : `[System] ${err.message}` });
       setRetryStmt({ stmt });
     } finally {
       setExtracting(null);
@@ -191,8 +191,8 @@ export default function BankStatements() {
   const renameableCount = statements.filter(s => s.month && s.year).length;
   const hasRawNames = statements.some(s => {
     if (!s.month || !s.year) return false;
-    const months = ['January','February','March','April','May','June',
-                    'July','August','September','October','November','December'];
+    const months = ['January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'];
     const expected = `${months[s.month - 1]} ${s.year}`;
     return !s.filename.startsWith(expected);
   });
@@ -263,7 +263,7 @@ export default function BankStatements() {
 
   if (loading) return <LoadingSpinner />;
 
-  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const coveredMonths = new Set();
   statements.forEach(s => {
     if (effectiveYear && s.year === effectiveYear && s.month) coveredMonths.add(s.month);
@@ -326,11 +326,10 @@ export default function BankStatements() {
               return (
                 <div
                   key={m}
-                  className={`text-center py-2 rounded-md text-xs font-medium transition-colors ${
-                    has
+                  className={`text-center py-2 rounded-md text-xs font-medium transition-colors ${has
                       ? 'bg-zinc-900 text-white'
                       : 'bg-zinc-100 text-zinc-400'
-                  }`}
+                    }`}
                   title={has ? `${m} ${effectiveYear} — statement uploaded` : `${m} ${effectiveYear} — no statement`}
                 >
                   {m}
@@ -370,9 +369,8 @@ export default function BankStatements() {
           </div>
         </div>
         {statusMsg && (
-          <div className={`mt-3 flex items-center gap-2 text-xs ${
-            statusMsg.type === 'error' ? 'text-red-600' : 'text-green-600'
-          }`}>
+          <div className={`mt-3 flex items-center gap-2 text-xs ${statusMsg.type === 'error' ? 'text-red-600' : 'text-green-600'
+            }`}>
             {statusMsg.type === 'error'
               ? <XCircle className="w-3.5 h-3.5 flex-shrink-0" />
               : <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
@@ -392,12 +390,13 @@ export default function BankStatements() {
           <div className="mt-3 space-y-2">
             <div className="flex items-center justify-between text-xs text-zinc-500">
               <span className="flex items-center gap-1.5">
-                {extractStep === 'download' && <><Download className="w-3 h-3" strokeWidth={1.5} /> Downloading PDF...</>}
+                {extractStep === 'download' && <><Download className="w-3 h-3" strokeWidth={1.5} /> Downloading statement...</>}
                 {extractStep === 'extract-text' && <><FileText className="w-3 h-3" strokeWidth={1.5} /> Reading PDF text...</>}
+                {extractStep === 'csv-extract' && <><FileSpreadsheet className="w-3 h-3" strokeWidth={1.5} /> Parsing CSV...</>}
                 {extractStep.startsWith('ai-call') && (
                   <><Sparkles className="w-3 h-3" strokeWidth={1.5} /> {
-                    extractStep === 'ai-call' 
-                      ? 'Gemini is analyzing...' 
+                    extractStep === 'ai-call'
+                      ? 'Gemini is analyzing...'
                       : `Gemini is analyzing page ${extractStep.replace('ai-call-', '').replace('-of-', ' of ')}...`
                   }</>
                 )}
@@ -406,6 +405,7 @@ export default function BankStatements() {
               <span>
                 {extractStep === 'download' && '1/4'}
                 {extractStep === 'extract-text' && '2/4'}
+                {extractStep === 'csv-extract' && '3/4'}
                 {extractStep.startsWith('ai-call') && '3/4'}
                 {extractStep === 'saving' && '4/4'}
               </span>
@@ -415,8 +415,9 @@ export default function BankStatements() {
                 className="h-full bg-zinc-900 rounded-full transition-all duration-500 ease-out"
                 style={{
                   width: extractStep === 'download' ? '25%' :
-                         extractStep === 'extract-text' ? '50%' :
-                         extractStep.startsWith('ai-call') ? '75%' : '100%'
+                    extractStep === 'extract-text' ? '50%' :
+                    extractStep === 'csv-extract' ? '75%' :
+                      extractStep.startsWith('ai-call') ? '75%' : '100%'
                 }}
               />
             </div>
