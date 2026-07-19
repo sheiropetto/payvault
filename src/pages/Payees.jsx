@@ -197,7 +197,7 @@ export default function Payees() {
                           </div>
                         ) : (
                           <button
-                            onClick={() => startEdit(payee)}
+                            onClick={() => startEdit(p.payee)}
                             className="p-1.5 rounded-md text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 transition-colors"
                             title="Rename payee"
                           >
