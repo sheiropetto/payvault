@@ -212,7 +212,7 @@ async function callGemini(apiKey, pdfText) {
 
   const transactions = parseTransactions(content);
   if (!transactions || !Array.isArray(transactions) || transactions.length === 0) {
-    throw new Error('Gemini returned 0 transactions');
+    throw new Error(`Gemini returned 0 transactions. Raw response: ${content ? content.slice(0, 150) : 'empty'}`);
   }
 
   return { transactions, provider: 'gemini', usage: data.usageMetadata };
