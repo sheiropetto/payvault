@@ -669,8 +669,8 @@ export async function onRequest(context) {
       }
     } else {
       // ─── AI-powered PDF extraction ───
-      // provider: 'deepseek' | 'gemini' (default: gemini)
-      const selectedProvider = (preferredProvider || 'gemini').toLowerCase();
+      // provider: 'deepseek' | 'gemini' (default: deepseek)
+      const selectedProvider = (preferredProvider || 'deepseek').toLowerCase();
 
       if (selectedProvider === 'deepseek') {
         if (!env.DEEPSEEK_API_KEY) {

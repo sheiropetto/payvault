@@ -13,7 +13,4 @@ database_id = "74212605-8c7b-4272-a14e-d945d771e05c"
 binding = "STORAGE"
 bucket_name = "payvault-storage"
 
-[vars]
-# API keys are set via wrangler pages secret put GEMINI_API_KEY / DEEPSEEK_API_KEY
-GEMINI_API_KEY = ""
-DEEPSEEK_API_KEY = ""
+# Secrets set via: wrangler pages secret put GEMINI_API_KEY / DEEPSEEK_API_KEY

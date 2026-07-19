@@ -37,7 +37,7 @@ export default function BankStatements() {
   const [confirm, setConfirm] = useState(null);
   const [extracting, setExtracting] = useState(null);
   const [extractStep, setExtractStep] = useState(''); // 'download' | 'extract-text' | 'ai-call' | 'saving'
-  const [extractProvider, setExtractProvider] = useState('gemini'); // 'gemini' | 'deepseek'
+  const [extractProvider, setExtractProvider] = useState('deepseek'); // 'deepseek' | 'gemini'
   const [statusMsg, setStatusMsg] = useState(null);
   const [retryStmt, setRetryStmt] = useState(null); // { stmt }
   const [selectedYear, setSelectedYear] = useState('');
