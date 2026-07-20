@@ -93,127 +93,101 @@ The format example above uses FAKE DATA (dates 99/99, amounts 9999.99, names lik
 // Uses the RUNNING BALANCE as ground truth to determine debit/credit and amounts.
 // Handles the space-joined format from pdf.js where newlines are lost.
 function preprocessPublicBankText(rawText) {
-  // Step 1: Find all DD/MM date markers and their positions
-  const dateMarkers = [];
-  const dateRegex = /\b(\d{2}\/\d{2})\b/g;
-  let dm;
-  while ((dm = dateRegex.exec(rawText)) !== null) {
-    dateMarkers.push({ date: dm[1], pos: dm.index });
-  }
-  if (dateMarkers.length === 0) return null;
+  // Ported from Python pypdf parser — processes line-by-line using
+  // the new pdf.js Y-coordinate grouped text format.
+  const lines = rawText.split('\n');
 
-  // Step 2: Find all AMOUNT BALANCE pairs (e.g., "3,000.00 21,731.31")
-  const amtBalRegex = /([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\b/g;
-  const allMatches = [];
-  let ab;
-  while ((ab = amtBalRegex.exec(rawText)) !== null) {
-    allMatches.push({
-      amount: parseFloat(ab[1].replace(/,/g, '')),
-      balance: parseFloat(ab[2].replace(/,/g, '')),
-      pos: ab.index,
-      endPos: ab.index + ab[0].length,
-      rawMatch: ab[0],
-    });
-    // Advance past only the first number, so the second number can be
-    // the first number of the next match. This prevents Balance B/F ghosts
-    // from consuming the real transaction's amount.
-    amtBalRegex.lastIndex = ab.index + ab[1].length + 1;
-  }
-  if (allMatches.length === 0) return null;
+  // Pattern for: DD/MM AMOUNT BALANCE [DESC]   (date + tx on same line)
+  const txWithDate = /^(\d{2}\/\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})(?:\s+(.*))?$/;
+  // Pattern for: AMOUNT BALANCE [DESC]         (tx without date, carries from previous)
+  const txNoDate = /^([\d,]+\.\d{2})\s+([\d,]+\.\d{2})(?:\s+(.*))?$/;
 
-  // Step 3: Assign each AMOUNT+BALANCE pair to the nearest preceding DD/MM date
-  // Also extract description between this pair and the next pair (or end)
+  const TX_CODES = /\b(TSFR|DUITNOW|GIRO|DR-ECP|DEP-ECP|CHEQ|CHQ|LOAN|AUTOMATED|FPX|IBG|ATM|DEP-CASH|RMT|MISC|KUMPULAN|PERTUBUHAN|LEMBAGA|MAXIS)\b/i;
+
+  const SKIP_LINE = /^(TEGASAN|RINGKASAN|Jumlah|Baki|This is a computer|No signature|PeeBee|Page \d|PENYATA|Nombor|Jenis|Tarikh|Muka|Dilindungi|Protected|Terima|Thank|Your banking|Anda boleh|You may|PERHATIAN|Dimaklumkan|Please be|sifar|tolerance|DATE TRANSACTION|TARIKH URUS|RAZ UTAMA|KL CITY|GRD FLOOR|BOX \d|TEL:|\. |Join the|Campaign|^\d+$)/i;
+
   const entries = [];
-  for (let i = 0; i < allMatches.length; i++) {
-    const match = allMatches[i];
-    const nextMatch = allMatches[i + 1];
+  let currentDate = null;
 
-    // Find nearest preceding date
-    let dateStr = null;
-    for (let j = dateMarkers.length - 1; j >= 0; j--) {
-      if (dateMarkers[j].pos < match.pos) {
-        dateStr = dateMarkers[j].date;
-        break;
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || SKIP_LINE.test(line)) continue;
+
+    // Try date + amount + balance + optional desc
+    let m = txWithDate.exec(line);
+    if (m) {
+      currentDate = m[1];
+      const amount = parseFloat(m[2].replace(/,/g, ''));
+      const balance = parseFloat(m[3].replace(/,/g, ''));
+      let desc = (m[4] || '').trim();
+
+      if (desc && desc.length >= 2 && TX_CODES.test(desc)) {
+        entries.push({ dateStr: currentDate, amount, balance, desc });
       }
+      continue;
     }
-    if (!dateStr) continue;
 
-    // Extract description: text from end of this match to start of next match.
-    // Handle overlapping matches (caused by Balance B/F ghosts): if next match
-    // starts before this one ends, this is a ghost — skip it.
-    const descStart = match.endPos;
-    const descEnd = nextMatch ? nextMatch.pos : rawText.length;
-    if (nextMatch && nextMatch.pos < match.endPos) continue; // overlapping ghost
-    let desc = rawText.substring(descStart, descEnd).trim();
+    // Try amount + balance + optional desc (no date)
+    m = txNoDate.exec(line);
+    if (m && currentDate) {
+      const amount = parseFloat(m[1].replace(/,/g, ''));
+      const balance = parseFloat(m[2].replace(/,/g, ''));
+      let desc = (m[3] || '').trim();
 
-    // Clean up description: remove trailing date markers that belong to next group
-    desc = desc.replace(/\s*\d{2}\/\d{2}\s*$/, '').trim();
+      if (desc && desc.length >= 2) {
+        if (/^Balance/i.test(desc)) continue;
 
-    // Skip if description is empty or is a non-transaction header
-    if (!desc || desc.length < 3) continue;
-    if (/^(TEGASAN|RINGKASAN|Jumlah|Baki|This is a computer|No signature|PeeBee|Page \d|PENYATA|Nombor|Jenis|Tarikh|Muka|Dilindungi|Protected|Terima|Thank|Your banking|Anda boleh|You may|PERHATIAN|Dimaklumkan|Please be|sifar|tolerance)/i.test(desc)) continue;
+        if (TX_CODES.test(desc)) {
+          // New transaction on same date
+          entries.push({ dateStr: currentDate, amount, balance, desc });
+        } else if (entries.length > 0) {
+          // Continuation line — append to previous description
+          entries[entries.length - 1].desc += ' ' + desc;
+        }
+      }
+      continue;
+    }
 
-    // CRITICAL: If description starts with a decimal number, the regex mismatched.
-    // This happens when "Balance B/F 10,949.81" is followed by "2,000.00 8,949.81 ..."
-    // The regex pairs B/F amount (10,949.81) with next tx amount (2,000.00) instead of
-    // the real pair (2,000.00 + 8,949.81). Skip — real entry is the next match.
-    if (/^[\d,]+\.\d{2}\b/.test(desc)) continue;
-
-    // CRITICAL: description must contain a transaction code. This filters out
-    // summary numbers (e.g., "12,051.82 414,950.05") that happen to match the regex.
-    const TX_CODES = /\b(TSFR|DUITNOW|GIRO|DR-ECP|DEP-ECP|CHEQ|CHQ|LOAN|AUTOMATED|FPX|IBG|ATM|DEP-CASH|KUMPULAN|PERTUBUHAN|LEMBAGA|MAXIS|MISC|RMT)\b/i;
-    if (!TX_CODES.test(desc)) continue;
-
-    entries.push({
-      dateStr,
-      amount: match.amount,
-      balance: match.balance,
-      desc,
-    });
+    // Bare continuation line (reference numbers, etc.) — append to last entry
+    if (entries.length > 0 && line.length > 2 && !/^[\d,]+\.\d{2}/.test(line)) {
+      entries[entries.length - 1].desc += ' ' + line;
+    }
   }
 
   if (entries.length < 3) return null;
 
-  // Prepend the "Balance From Last Statement" as reference for first transaction
+  // Add Balance From Last Statement as reference for first transaction
   const bflMatch = rawText.match(/Balance\s+From\s+Last\s+Statement\s+([\d,]+\.\d{2})/i);
   if (bflMatch) {
-    const startingBalance = parseFloat(bflMatch[1].replace(/,/g, ''));
-    // Find the date of the first entry
-    const firstDate = entries[0]?.dateStr || '01/01';
     entries.unshift({
-      dateStr: firstDate,
+      dateStr: entries[0]?.dateStr || '01/01',
       amount: 0,
-      balance: startingBalance,
+      balance: parseFloat(bflMatch[1].replace(/,/g, '')),
       desc: 'BALANCE_FROM_LAST_STATEMENT',
       _isReference: true,
     });
   }
 
-  // Step 4: Determine DR/CR using balance chain.
-  // Balance BEFORE transaction (prev.balance) → Balance AFTER transaction (cur.balance)
-  // If balance went DOWN → DEBIT. If balance went UP → CREDIT.
+  // Determine DR/CR using balance chain (same logic as Python parser)
   const transactions = [];
   for (let i = 0; i < entries.length; i++) {
     const cur = entries[i];
     if (cur._isReference) continue;
-    const prev = entries[i - 1]; // balance BEFORE this transaction
+    const prev = entries[i - 1];
     const descUpper = cur.desc.toUpperCase();
 
     let type, txAmount;
 
     if (prev) {
-      const balanceDelta = cur.balance - prev.balance;
-      // balanceDelta < 0 → balance went DOWN → DEBIT
-      // balanceDelta > 0 → balance went UP → CREDIT
-
-      if (balanceDelta < -0.01) {
+      const delta = cur.balance - prev.balance;
+      if (delta < -0.005) {
         type = 'DEBIT';
-        txAmount = Math.abs(balanceDelta);
-      } else if (balanceDelta > 0.01) {
+        txAmount = Math.abs(delta);
+      } else if (delta > 0.005) {
         type = 'CREDIT';
-        txAmount = balanceDelta;
+        txAmount = delta;
       } else {
-        // Balance unchanged — check description for hints
+        // Balance unchanged — check description keywords
         if (/\b(CR|CDT|DEP[- ])/i.test(descUpper)) {
           type = 'CREDIT';
           txAmount = cur.amount;
@@ -225,16 +199,12 @@ function preprocessPublicBankText(rawText) {
         }
       }
     } else {
-      // First entry (no previous balance): trust description keywords
-      if (/\b(CR|CDT|DEP[- ])/i.test(descUpper)) {
-        type = 'CREDIT';
-      } else {
-        type = 'DEBIT';
-      }
+      // First entry: trust description keywords
+      type = /\b(CR|CDT|DEP[- ])/i.test(descUpper) ? 'CREDIT' : 'DEBIT';
       txAmount = cur.amount;
     }
 
-    if (txAmount < 0.01) continue;
+    if (txAmount < 0.005) continue;
 
     transactions.push({
       idx: transactions.length + 1,
