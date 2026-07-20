@@ -254,7 +254,7 @@ function mergePreprocessedWithAI(preprocessed, aiTransactions, rawText) {
 
     const payee = (aiTx && aiTx.payee != null)
       ? aiTx.payee
-      : cleanPayeeName(ppTx.rawDescription);
+      : extractPayee(ppTx.rawDescription);
 
     // Use AI description if available and not empty, otherwise use raw description
     const aiDesc = (aiTx && aiTx.description) ? aiTx.description : '';
@@ -646,6 +646,88 @@ function findHeaderAndMap(rows) {
     }
   }
   return null;
+}
+
+// ─── Smart payee extraction: pattern-based per transaction type ───
+function extractPayee(desc) {
+  if (!desc) return '';
+  const d = desc.trim();
+  const du = d.toUpperCase();
+
+  // ── Known entity lookup (cleaned names from existing good data) ──
+  const knownEntities = {
+    'LEMBAGA HASIL DALAM NEGERI': 'LEMBAGA HASIL DALAM NEGERI',
+    'KUMPULAN WANG SIMPANAN PEKERJA': 'KUMPULAN WANG SIMPANAN PEKERJA',
+    'PERTUBUHAN KESELAMATAN SOSIAL': 'PERTUBUHAN KESELAMATAN SOSIAL',
+    'LEMBAGA PEMBANGUNAN INDUSTRI': 'LEMBAGA PEMBANGUNAN INDUSTRI',
+  };
+
+  // ── DR-ECP: known government entities ──
+  if (/\bDR-ECP\b/.test(du)) {
+    for (const [key, val] of Object.entries(knownEntities)) {
+      if (du.includes(key)) return val;
+    }
+  }
+
+  // ── DUITNOW TRSF DR XXXXXX PAYEE_NAME [PURPOSE] ──
+  let m = du.match(/DUITNOW\s+TRSF\s+DR\s+\d{6}\s+(.+)/);
+  if (m) {
+    let payee = m[1].trim();
+    // Strip trailing purpose keywords
+    payee = payee.replace(/\s+(PAYMENT|PYMT|PETTY\s+CASH|SALARY|CLAIM|RENTAL|INSTALLMENT|EXPENSES|ALLOWANCE|CERT|FEE|COURSE|SERVICE|DOWNPYMT|PARKING|CHECK\s+SOLAR|BIL\s+TM|INSOLVENSI|ELAUN|CLEANER|MONTLY|TENDER|AUDIT|ROADTAX|INSURANCE|PRINT|COMPANY|PROFILE|SABAH|TIKET|GALA|DINNER|SPAN|HSE|LOAN|SCORE|PRINTER|IMIGRESEN|MASSIVE|OFFICE|CYBER|TNB|INDAH|WATER|IWK).*/i, '');
+    // Strip trailing reference numbers
+    payee = payee.replace(/\s+\d{10,}.*$/i, '');
+    // Strip DUITNOW markers
+    payee = payee.replace(/\bDUITNOW\b.*$/i, '');
+    if (payee.length >= 3) return payee.trim().slice(0, 50);
+  }
+
+  // ── TSFR FUND DR-ATM/EFT XXXXXX [ACCT] PAYEE_NAME [PURPOSE] ──
+  m = du.match(/TSFR\s+FUND\s+DR-ATM\/EFT\s+\d{6}\s+(?:[A-Z0-9]{8,12}\s+)?(.+)/);
+  if (m) {
+    let payee = m[1].trim();
+    // Strip trailing purpose keywords
+    payee = payee.replace(/\s+(PAYMENT|PYMT|EXPENSES|SALARY|WORKERS\s+SALARY|HOTEL\s+PYMT).*/i, '');
+    // Strip trailing reference numbers
+    payee = payee.replace(/\s+[A-Z]{2,3}\d{4,}.*$/i, '');
+    if (payee.length >= 3) return payee.trim().slice(0, 50);
+  }
+
+  // ── GIRO PYMT-ATM/EFT XXXXXX PAYEE ──
+  m = du.match(/GIRO\s+PYMT-ATM\/EFT\s+\d*\s*(.+)/);
+  if (m) {
+    let payee = m[1].trim();
+    // JOMPAY entries have no clear payee
+    if (/\bJOMPAY\b/.test(payee)) return '';
+    if (payee.length >= 2) return payee.slice(0, 50);
+  }
+
+  // ── RMT CR → KENANGA INVESTMENT BANK ──
+  if (/\bRMT\s+CR\b/.test(du)) return 'KENANGA INVESTMENT BANK BERHAD';
+
+  // ── RMT DR / RMT CHRG DR → empty (bank fee) ──
+  if (/\bRMT\s+(DR|CHRG)\b/.test(du)) return '';
+
+  // ── AUTOMATED LOAN PYMT → empty ──
+  if (/\bAUTOMATED\s+LOAN\b/.test(du)) return '';
+
+  // ── CHQ PROCESS FEE / CHEQUE PROCESS FEE → empty ──
+  if (/\bCH(E)?Q(UE)?\s+PROCESS\s+FEE\b/i.test(du)) return '';
+
+  // ── CHEQ NNNNNN → empty (unknown recipient) ──
+  if (/^CHEQ\s+\d+/i.test(du)) return '';
+
+  // ── MISC DR → empty ──
+  if (/\bMISC\s+DR\b/.test(du)) return '';
+
+  // ── DEP-CASH → empty ──
+  if (/\bDEP-CASH\b/.test(du)) return '';
+
+  // ── FPX → empty ──
+  if (/\bFPX\b/.test(du)) return '';
+
+  // ── Fallback: cleanPayeeName generic stripping ──
+  return cleanPayeeName(desc);
 }
 
 function cleanPayeeName(desc) {
