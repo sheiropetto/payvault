@@ -107,6 +107,102 @@ export default function BankStatements() {
 import pypdf
 import pandas as pd
 
+PURPOSE_KEYWORDS = [
+    "PAYMENT", "PYMT", "PETTY CASH", "PETTYCASH", "SALARY", "CLAIM", "RENTAL", 
+    "INSTALLMENT", "EXPENSES", "ALLOWANCE", "CERT", "FEE", "COURSE", "SERVICE", 
+    "DOWNPYMT", "PARKING", "CHECK SOLAR", "BIL TM", "INSOLVENSI", "ELAUN", 
+    "CLEANER", "MONTLY", "TENDER", "AUDIT", "ROADTAX", "INSURANCE", "PRINT", 
+    "COMPANY", "PROFILE", "SABAH", "TIKET", "GALA", "DINNER", "SPAN", "HSE", 
+    "LOAN", "SCORE", "PRINTER", "IMIGRESEN", "MASSIVE", "OFFICE", "CYBER", 
+    "TNB", "INDAH WATER", "IWK", "PETTY", "CASH", "BIL", "CTC", "AZ", "FOR", 
+    "ICE", "NATHAN", "TRANSFER", "FUND", "JAN", "FEB", "MAR", "APR", "MAY", 
+    "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC", "JAN24", "JANUARY", 
+    "FEBRUARY", "MARCH", "APRIL", "JUNE", "JULY", "AUGUST", "SEPTEMBER", 
+    "OCTOBER", "NOVEMBER", "DECEMBER", "DUIT RAYA", "DUITRAYA"
+]
+
+purpose_pattern = re.compile(r'\\s+\\b(' + '|'.join(PURPOSE_KEYWORDS) + r')\\b.*', re.IGNORECASE)
+
+def clean_extracted_name(name):
+    name = re.sub(r'MYCN\\d+.*', '', name, flags=re.IGNORECASE)
+    name = re.sub(r'DUITNOW\\s*\\(.*', '', name, flags=re.IGNORECASE)
+    name = re.sub(r'Balance\\s+C/F.*', '', name, flags=re.IGNORECASE)
+    name = purpose_pattern.sub('', name)
+    name = re.sub(r'\\s+\\b(?=[A-Z]*\\d)(?=\\d*[A-Z])[A-Z0-9_-]{5,}\\b.*$', '', name, flags=re.IGNORECASE)
+    name = re.sub(r'\\s+', ' ', name).strip()
+    return name
+
+def extract_payee(desc):
+    if not desc:
+        return ""
+    du = desc.upper()
+    known_entities = {
+        'LEMBAGA HASIL DALAM NEGERI': 'LEMBAGA HASIL DALAM NEGERI',
+        'KUMPULAN WANG SIMPANAN PEKERJA': 'KUMPULAN WANG SIMPANAN PEKERJA',
+        'PERTUBUHAN KESELAMATAN SOSIAL': 'PERTUBUHAN KESELAMATAN SOSIAL',
+        'LEMBAGA PEMBANGUNAN INDUSTRI': 'LEMBAGA PEMBANGUNAN INDUSTRI',
+    }
+    for key, val in known_entities.items():
+        if key in du:
+            return val
+            
+    if 'DR-ECP' in du:
+        m = re.search(r'DR-ECP\\s+\\d+(?:\\s+\\d+)?\\s*(.*)', du)
+        if m:
+            return clean_extracted_name(m.group(1))
+    if 'DEP-ECP' in du:
+        m = re.search(r'DEP-ECP\\s+\\d+\\s*(.*)', du)
+        if m:
+            name = m.group(1)
+            name = re.sub(r'^[A-Z0-9]{15,}\\s+', '', name)
+            name = re.sub(r'^(RHB|MBB|PBB|CIMB)\\s+', '', name, flags=re.IGNORECASE)
+            return clean_extracted_name(name)
+
+    m = re.search(r'DUITNOW\\s+TRSF\\s+(?:DR|CR)\\s+(?:\\d{6}\\s+)?(.*)', du)
+    if m:
+        return clean_extracted_name(m.group(1))
+        
+    m = re.search(r'TSFR\\s+FUND\\s+(?:DR|CR)(?:-ATM/EFT)?\\s+\\d{6}\\s+(?:\\w*X{2,}\\w*\\s+)?(.*)', du)
+    if m:
+        name = m.group(1)
+        name = re.sub(r'^(IBG|SCB|CGB|WARRANT|TRANSFER|EFT)\\s+', '', name, flags=re.IGNORECASE)
+        return clean_extracted_name(name)
+        
+    m = re.search(r'GIRO\\s+PYMT-ATM/EFT\\s+\\d*\\s*(.*)', du)
+    if m:
+        name = m.group(1)
+        if 'JOMPAY' in name:
+            return ''
+        return clean_extracted_name(name)
+
+    if 'RMT CR' in du:
+        return 'KENANGA INVESTMENT BANK BERHAD'
+    if any(x in du for x in ['RMT DR', 'RMT CHRG']):
+        return ''
+    if 'AUTOMATED LOAN' in du:
+        return ''
+    if re.search(r'\\bCH(E)?Q(UE)?\\s+PROCESS\\s+FEE\\b', du):
+        return ''
+    if re.match(r'^CHEQ\\s+\\d+', du):
+        return ''
+    if 'MISC DR' in du:
+        return ''
+    if 'DEP-CASH' in du:
+        return ''
+    if 'FPX' in du:
+        return ''
+
+    cleaned = du
+    prefixes = [
+        r'\\b(TSFR|FUND|CR|DR|DUITNOW|TRSF|GIRO|PYMT|FPX|DEP-CASH|CDT|IBG|ATM|CASH)\\b',
+        r'\\b(ATM-EFT|PROCESS|FEE|LEMBAGA|HASIL|DALAM|NEGERI)\\b',
+        r'\\d{5,}',
+        r'[^A-Z0-9\\s.\\-/&]'
+    ]
+    for pattern in prefixes:
+        cleaned = re.sub(pattern, ' ', cleaned)
+    return clean_extracted_name(cleaned)
+
 def parse_public_bank_statement(pdf_path):
     reader = pypdf.PdfReader(pdf_path)
     full_text = ""
@@ -199,6 +295,7 @@ def parse_public_bank_statement(pdf_path):
                 dr, cr = e['amount'], 0.0
         if dr + cr >= 0.005:
             records.append({'Date': e['date'], 'Description': e['desc'][:150],
+                          'Payee': extract_payee(e['desc']),
                           'Withdrawal (DR)': round(dr, 2),
                           'Deposit (CR)': round(cr, 2),
                           'Balance': e['balance']})

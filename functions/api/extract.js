@@ -649,6 +649,40 @@ function findHeaderAndMap(rows) {
 }
 
 // ─── Smart payee extraction: pattern-based per transaction type ───
+const PURPOSE_KEYWORDS = [
+  "PAYMENT", "PYMT", "PETTY CASH", "PETTYCASH", "SALARY", "CLAIM", "RENTAL", 
+  "INSTALLMENT", "EXPENSES", "ALLOWANCE", "CERT", "FEE", "COURSE", "SERVICE", 
+  "DOWNPYMT", "PARKING", "CHECK SOLAR", "BIL TM", "INSOLVENSI", "ELAUN", 
+  "CLEANER", "MONTLY", "TENDER", "AUDIT", "ROADTAX", "INSURANCE", "PRINT", 
+  "COMPANY", "PROFILE", "SABAH", "TIKET", "GALA", "DINNER", "SPAN", "HSE", 
+  "LOAN", "SCORE", "PRINTER", "IMIGRESEN", "MASSIVE", "OFFICE", "CYBER", 
+  "TNB", "INDAH WATER", "IWK", "PETTY", "CASH", "BIL", "CTC", "AZ", "FOR", 
+  "ICE", "NATHAN", "TRANSFER", "FUND", "JAN", "FEB", "MAR", "APR", "MAY", 
+  "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC", "JAN24", "JANUARY", 
+  "FEBRUARY", "MARCH", "APRIL", "JUNE", "JULY", "AUGUST", "SEPTEMBER", 
+  "OCTOBER", "NOVEMBER", "DECEMBER", "DUIT RAYA", "DUITRAYA"
+];
+
+const purposePattern = new RegExp('\\s+\\b(' + PURPOSE_KEYWORDS.join('|') + ')\\b.*', 'i');
+
+function cleanExtractedName(name) {
+  // Strip common system identifiers / references
+  name = name.replace(/MYCN\d+.*/i, '');
+  name = name.replace(/DUITNOW\s*\(.*/i, '');
+  name = name.replace(/Balance\s+C\/F.*/i, '');
+  
+  // Strip purpose and trailing text
+  name = name.replace(purposePattern, '');
+  
+  // Strip any alphanumeric reference codes (must contain BOTH letters and digits, and be length >= 5)
+  name = name.replace(/\s+\b(?=[A-Z]*\d)(?=\d*[A-Z])[A-Z0-9_-]{5,}\b.*$/i, '');
+  
+  // Clean up double spaces
+  name = name.replace(/\s+/g, ' ').trim();
+  return name;
+}
+
+// ─── Smart payee extraction: pattern-based per transaction type ───
 function extractPayee(desc) {
   if (!desc) return '';
   const d = desc.trim();
@@ -662,49 +696,47 @@ function extractPayee(desc) {
     'LEMBAGA PEMBANGUNAN INDUSTRI': 'LEMBAGA PEMBANGUNAN INDUSTRI',
   };
 
-  // ── DR-ECP: known government entities ──
+  for (const [key, val] of Object.entries(knownEntities)) {
+    if (du.includes(key)) return val;
+  }
+
+  // ── DR-ECP / DEP-ECP ──
   if (/\bDR-ECP\b/.test(du)) {
-    for (const [key, val] of Object.entries(knownEntities)) {
-      if (du.includes(key)) return val;
+    const m = du.match(/DR-ECP\s+\d+(?:\s+\d+)?\s*(.*)/);
+    if (m) return cleanExtractedName(m[1]);
+  }
+  if (/\bDEP-ECP\b/.test(du)) {
+    const m = du.match(/DEP-ECP\s+\d+\s*(.*)/);
+    if (m) {
+      let name = m[1];
+      // Strip long prefix codes (like IMEPS20240422100002189924882)
+      name = name.replace(/^[A-Z0-9]{15,}\s+/, '');
+      // Strip bank prefix if any
+      name = name.replace(/^(RHB|MBB|PBB|CIMB)\s+/i, '');
+      return cleanExtractedName(name);
     }
   }
 
-  // ── DUITNOW TRSF DR [XXXXXX] PAYEE_NAME [PURPOSE] ──
-  // Note: the 6-digit ref may be on a different Y-line in pdf.js, so make it optional
-  let m = du.match(/DUITNOW\s+TRSF\s+DR\s+(?:\d{6}\s+)?(.+)/);
+  // ── DUITNOW TRSF DR/CR ──
+  let m = du.match(/DUITNOW\s+TRSF\s+(?:DR|CR)\s+(?:\d{6}\s+)?(.+)/);
   if (m) {
-    let payee = m[1].trim();
-    // Strategy: the payee is a person/company name. Everything after it
-    // is purpose text (PAYMENT, SALARY, RENTAL, etc.) or reference numbers.
-    // Strip: 1) trailing purpose keywords, 2) reference numbers, 3) DUITNOW markers
-    payee = payee.replace(/\s+(PAYMENT|PYMT|PETTY\s*CASH|SALARY|CLAIM|RENTAL|INSTALLMENT|EXPENSES|ALLOWANCE|CERT|FEE|COURSE|SERVICE|DOWNPYMT|PARKING|CHECK\s+SOLAR|BIL\s+TM|INSOLVENSI|ELAUN|CLEANER|MONTLY|TENDER|AUDIT|ROADTAX|INSURANCE|PRINT|COMPANY|PROFILE|SABAH|TIKET|GALA|DINNER|SPAN|HSE|LOAN|SCORE|PRINTER|IMIGRESEN|MASSIVE|OFFICE|CYBER|TNB|INDAH|WATER|IWK|PETTY|CASH|BIL|OFFICE|CTC|AZ|FOR|ICE|NATHAN|TRANSFER|FUND|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|JAN24|JANUARY|FEBRUARY|MARCH|APRIL|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER).*/i, '');
-    // Strip trailing reference numbers (bank codes like PBBEMYKL...)
-    payee = payee.replace(/\s+[A-Z]{2,}[A-Z0-9]{5,}.*$/i, '');
-    // Strip DUITNOW markers
-    payee = payee.replace(/\bDUITNOW\b.*$/i, '');
-    if (payee.length >= 3) return 'A_' + payee.trim().slice(0, 48);
+    return cleanExtractedName(m[1]);
   }
 
-  // ── TSFR FUND DR-ATM/EFT XXXXXX [ACCT] PAYEE_NAME [PURPOSE] ──
-  m = du.match(/TSFR\s+FUND\s+DR-ATM\/EFT\s+\d{6}\s+(?:[A-Z0-9]{8,12}\s+)?(.+)/);
+  // ── TSFR FUND DR/CR-ATM/EFT ──
+  m = du.match(/TSFR\s+FUND\s+(?:DR|CR)(?:-ATM\/EFT)?\s+\d{6}\s+(?:\w*X{2,}\w*\s+)?(.+)/);
   if (m) {
-    let payee = m[1].trim();
-    // Strip trailing purpose keywords (same broad list)
-    payee = payee.replace(/\s+(PAYMENT|PYMT|EXPENSES|SALARY|WORKERS\s+SALARY|HOTEL\s+PYMT|TRANSFER|SCB|CGB|WARRANT|IBG|RAZ\s+UTAMA|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC).*/i, '');
-    // Strip trailing reference numbers
-    payee = payee.replace(/\s+[A-Z]{2,}[A-Z0-9]{5,}.*$/i, '');
-    // Strip common prefixes that leak through
-    payee = payee.replace(/^(IBG|SCB|CGB|WARRANT|TRANSFER|EFT)\s+/i, '');
-    if (payee.length >= 3) return 'B_' + payee.trim().slice(0, 48);
+    let name = m[1];
+    name = name.replace(/^(IBG|SCB|CGB|WARRANT|TRANSFER|EFT)\s+/i, '');
+    return cleanExtractedName(name);
   }
 
-  // ── GIRO PYMT-ATM/EFT XXXXXX PAYEE ──
+  // ── GIRO PYMT-ATM/EFT ──
   m = du.match(/GIRO\s+PYMT-ATM\/EFT\s+\d*\s*(.+)/);
   if (m) {
-    let payee = m[1].trim();
-    // JOMPAY entries have no clear payee
-    if (/\bJOMPAY\b/.test(payee)) return 'C_';
-    if (payee.length >= 2) return 'C_' + payee.slice(0, 48);
+    let name = m[1];
+    if (/\bJOMPAY\b/.test(name)) return '';
+    return cleanExtractedName(name);
   }
 
   // ── RMT CR → KENANGA INVESTMENT BANK ──
@@ -731,10 +763,8 @@ function extractPayee(desc) {
   // ── FPX → empty ──
   if (/\bFPX\b/.test(du)) return '';
 
-  // ── Fallback: cleanPayeeName generic stripping ──
-  // If we reach here, extractPayee couldn't determine the payee.
-  // cleanPayeeName is the legacy fallback.
-  return 'z_' + cleanPayeeName(desc);
+  // Fallback to cleanPayeeName
+  return cleanPayeeName(desc);
 }
 
 function cleanPayeeName(desc) {
@@ -744,13 +774,13 @@ function cleanPayeeName(desc) {
     /\b(TSFR|FUND|CR|DR|DUITNOW|TRSF|GIRO|PYMT|FPX|DEP-CASH|CDT|IBG|ATM|CASH)\b/g,
     /\b(ATM-EFT|PROCESS|FEE|LEMBAGA|HASIL|DALAM|NEGERI)\b/g,
     /\d{5,}/g,
-    /[^A-Z0-9\s]/g
+    /[^A-Z0-9\s.\-/&]/g
   ];
   for (const pattern of prefixesToRemove) {
     cleaned = cleaned.replace(pattern, ' ');
   }
-  cleaned = cleaned.replace(/\s+/g, ' ').trim();
-  return cleaned.slice(0, 50).trim();
+  cleaned = cleanExtractedName(cleaned);
+  return cleaned;
 }
 
 // ─── Main handler ───
