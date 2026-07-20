@@ -98,9 +98,10 @@ function preprocessPublicBankText(rawText) {
   const lines = rawText.split('\n');
 
   // Pattern for: DD/MM AMOUNT BALANCE [DESC]   (date + tx on same line)
-  const txWithDate = /^(\d{2}\/\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})(?:\s+(.*))?$/;
+  // Handles both pypdf (spaces between fields) and pdf.js (concatenated) formats
+  const txWithDate = /^(\d{2}\/\d{2})\s*([\d,]+\.\d{2})\s*([\d,]+\.\d{2})\s*(.*)$/;
   // Pattern for: AMOUNT BALANCE [DESC]         (tx without date, carries from previous)
-  const txNoDate = /^([\d,]+\.\d{2})\s+([\d,]+\.\d{2})(?:\s+(.*))?$/;
+  const txNoDate = /^([\d,]+\.\d{2})\s*([\d,]+\.\d{2})\s*(.*)$/;
 
   const TX_CODES = /\b(TSFR|DUITNOW|GIRO|DR-ECP|DEP-ECP|CHEQ|CHQ|LOAN|AUTOMATED|FPX|IBG|ATM|DEP-CASH|RMT|MISC|KUMPULAN|PERTUBUHAN|LEMBAGA|MAXIS)\b/i;
 

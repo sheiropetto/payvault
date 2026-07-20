@@ -16,18 +16,40 @@ export async function extractTextFromPDF(file) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
       
-      // Group text items by Y-coordinate (line) — like pypdf preserves layout
-      const lines = new Map();
-      for (const item of content.items) {
+      // Sort items by position: Y descending (top to bottom), X ascending (left to right)
+      const items = [...content.items].sort((a, b) => {
+        const ay = a.transform ? a.transform[5] : 0;
+        const by = b.transform ? b.transform[5] : 0;
+        // Group by Y with 2px tolerance
+        const yDiff = Math.abs(ay - by);
+        if (yDiff > 2) return by - ay; // descending Y = reading order
+        const ax = a.transform ? a.transform[4] : 0;
+        const bx = b.transform ? b.transform[4] : 0;
+        return ax - bx; // ascending X
+      });
+      
+      // Build lines: new line when Y gap > 2px
+      const lines = [];
+      let currentLine = [];
+      let lastY = null;
+      
+      for (const item of items) {
         const y = item.transform ? Math.round(item.transform[5]) : 0;
-        if (!lines.has(y)) lines.set(y, []);
-        lines.get(y).push(item.str);
+        if (lastY !== null && Math.abs(y - lastY) > 2) {
+          if (currentLine.length > 0) {
+            // Join items on the same line — pypdf style (items concatenated)
+            lines.push(currentLine.map(it => it.str).join(''));
+          }
+          currentLine = [];
+        }
+        currentLine.push(item);
+        lastY = y;
+      }
+      if (currentLine.length > 0) {
+        lines.push(currentLine.map(it => it.str).join(''));
       }
       
-      // Sort lines by Y (top to bottom) and join items on same line
-      const sortedYs = [...lines.keys()].sort((a, b) => b - a); // descending Y = top to bottom
-      const pageText = sortedYs.map(y => lines.get(y).join('')).join('\n');
-      pages.push(pageText);
+      pages.push(lines.join('\n'));
     }
 
     return pages;
