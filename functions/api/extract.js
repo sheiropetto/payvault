@@ -97,11 +97,11 @@ function preprocessPublicBankText(rawText) {
   // the new pdf.js Y-coordinate grouped text format.
   const lines = rawText.split('\n');
 
-  // Pattern for: DD/MM AMOUNT BALANCE [DESC]   (date + tx on same line)
-  // Handles both pypdf (spaces between fields) and pdf.js (concatenated) formats
-  const txWithDate = /^(\d{2}\/\d{2})\s*([\d,]+\.\d{2})\s*([\d,]+\.\d{2})\s*(.*)$/;
-  // Pattern for: AMOUNT BALANCE [DESC]         (tx without date, carries from previous)
-  const txNoDate = /^([\d,]+\.\d{2})\s*([\d,]+\.\d{2})\s*(.*)$/;
+  // pdf.js Y-grouped format: DD/MM DESC...AMOUNT BALANCE (amounts at END of line)
+  // Also handles pypdf format: DD/MM AMOUNT BALANCEDESC
+  // Strategy: capture last two [\d,]+\.\d{2} as amount+balance, everything before as desc/date
+  const txWithDate = /^(\d{2}\/\d{2})\s+(.*?)([\d,]+\.\d{2})\s*([\d,]+\.\d{2})\s*$/;
+  const txNoDate = /^(.*?)([\d,]+\.\d{2})\s*([\d,]+\.\d{2})\s*$/;
 
   const TX_CODES = /\b(TSFR|DUITNOW|GIRO|DR-ECP|DEP-ECP|CHEQ|CHQ|LOAN|AUTOMATED|FPX|IBG|ATM|DEP-CASH|RMT|MISC|KUMPULAN|PERTUBUHAN|LEMBAGA|MAXIS)\b/i;
 
@@ -114,13 +114,13 @@ function preprocessPublicBankText(rawText) {
     const line = rawLine.trim();
     if (!line || SKIP_LINE.test(line)) continue;
 
-    // Try date + amount + balance + optional desc
+    // Try date + desc + amount + balance (pdf.js format: desc before amounts)
     let m = txWithDate.exec(line);
     if (m) {
       currentDate = m[1];
-      const amount = parseFloat(m[2].replace(/,/g, ''));
-      const balance = parseFloat(m[3].replace(/,/g, ''));
-      let desc = (m[4] || '').trim();
+      let desc = (m[2] || '').trim();
+      const amount = parseFloat(m[3].replace(/,/g, ''));
+      const balance = parseFloat(m[4].replace(/,/g, ''));
 
       if (desc && desc.length >= 2 && TX_CODES.test(desc)) {
         entries.push({ dateStr: currentDate, amount, balance, desc });
@@ -128,12 +128,12 @@ function preprocessPublicBankText(rawText) {
       continue;
     }
 
-    // Try amount + balance + optional desc (no date)
+    // Try desc + amount + balance (no date)
     m = txNoDate.exec(line);
     if (m && currentDate) {
-      const amount = parseFloat(m[1].replace(/,/g, ''));
-      const balance = parseFloat(m[2].replace(/,/g, ''));
-      let desc = (m[3] || '').trim();
+      let desc = (m[1] || '').trim();
+      const amount = parseFloat(m[2].replace(/,/g, ''));
+      const balance = parseFloat(m[3].replace(/,/g, ''));
 
       if (desc && desc.length >= 2) {
         if (/^Balance/i.test(desc)) continue;
