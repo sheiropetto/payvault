@@ -69,42 +69,45 @@ function CurrencyCell({ value, onChange, className }) {
   );
 }
 
-// Resizable column header
-function ResizableTh({ children, className, initialWidth }) {
-  const ref = useRef(null);
+// Global column resizer handler (works from any cell td or th inside the table)
+export function handleResizeMouseDown(e, colIndex) {
+  e.preventDefault();
+  e.stopPropagation();
+  const startX = e.clientX;
+  const cell = e.target.closest('td, th');
+  if (!cell) return;
+  const table = cell.closest('table');
+  if (!table) return;
+  const ths = table.querySelectorAll('thead th');
+  const th = ths[colIndex];
+  if (!th) return;
+  const startWidth = th.offsetWidth;
 
-  function handleMouseDown(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    const startX = e.clientX;
-    const th = ref.current;
-    if (!th) return;
-    const startWidth = th.offsetWidth;
-
-    function onMouseMove(ev) {
-      const newWidth = Math.max(60, startWidth + (ev.clientX - startX));
-      th.style.width = `${newWidth}px`;
-    }
-
-    function onMouseUp() {
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-    }
-
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
+  function onMouseMove(ev) {
+    const newWidth = Math.max(60, startWidth + (ev.clientX - startX));
+    th.style.width = `${newWidth}px`;
   }
+
+  function onMouseUp() {
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+  }
+
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mouseup', onMouseUp);
+}
+
+// Resizable column header
+function ResizableTh({ children, className, initialWidth, colIndex }) {
+  const ref = useRef(null);
 
   return (
     <th ref={ref} className={`relative select-none ${className || ''}`}
       style={{ width: initialWidth, minWidth: 60 }}>
       {children}
-      {/* Visible resize handle — wider for easier grab */}
       <div
-        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize z-10
-          before:absolute before:right-0 before:top-0 before:bottom-0 before:w-px before:bg-zinc-200
-          hover:before:bg-zinc-500 hover:before:w-0.5"
-        onMouseDown={handleMouseDown}
+        className="col-resize-handle"
+        onMouseDown={(e) => handleResizeMouseDown(e, colIndex)}
       />
     </th>
   );
@@ -864,11 +867,12 @@ export default function Transactions() {
                     { key: 'voucher', label: 'Voucher', width: 130, className: 'text-center' },
                     { key: 'debit_amount', label: 'Debit (RM)', width: 120, className: 'text-right' },
                     { key: 'credit_amount', label: 'Credit (RM)', width: 120, className: 'text-right' },
-                  ].map(col => (
+                  ].map((col, i) => (
                     <ResizableTh
                       key={col.key || 'vouchered'}
                       className={`select-none ${col.className || ''}`}
                       initialWidth={col.width}
+                      colIndex={i + 1}
                     >
                       <div className="flex items-center justify-between gap-1 w-full relative">
                         <span
@@ -1025,6 +1029,7 @@ export default function Transactions() {
                           value={edit.date ?? tx.date?.slice(0, 10) ?? ''}
                           onChange={(e) => handleEdit(tx.id, 'date', e.target.value)}
                         />
+                        <div className="col-resize-handle" onMouseDown={(e) => handleResizeMouseDown(e, 1)} />
                       </td>
                       <td>
                         <input
@@ -1032,6 +1037,7 @@ export default function Transactions() {
                           value={edit.description ?? tx.description ?? ''}
                           onChange={(e) => handleEdit(tx.id, 'description', e.target.value)}
                         />
+                        <div className="col-resize-handle" onMouseDown={(e) => handleResizeMouseDown(e, 2)} />
                       </td>
                       <td>
                         <input
@@ -1039,6 +1045,7 @@ export default function Transactions() {
                           value={edit.particulars ?? tx.particulars ?? 'Payment'}
                           onChange={(e) => handleEdit(tx.id, 'particulars', e.target.value)}
                         />
+                        <div className="col-resize-handle" onMouseDown={(e) => handleResizeMouseDown(e, 3)} />
                       </td>
                       <td>
                         <input
@@ -1047,6 +1054,7 @@ export default function Transactions() {
                           onChange={(e) => handleEdit(tx.id, 'payee', e.target.value)}
                           placeholder="—"
                         />
+                        <div className="col-resize-handle" onMouseDown={(e) => handleResizeMouseDown(e, 4)} />
                       </td>
                       <td>
                         <Select
@@ -1058,6 +1066,7 @@ export default function Transactions() {
                             ...['Payment', 'Credit/Deposit', 'Fund Transfer', 'Bank Fee', 'Interest', 'Other'].map(c => ({ value: c, label: c }))
                           ]}
                         />
+                        <div className="col-resize-handle" onMouseDown={(e) => handleResizeMouseDown(e, 5)} />
                       </td>
                       <td className="text-center align-middle">
                         {tx.voucher_number ? (
@@ -1071,6 +1080,7 @@ export default function Transactions() {
                         ) : (
                           <span className="text-xs text-zinc-300">—</span>
                         )}
+                        <div className="col-resize-handle" onMouseDown={(e) => handleResizeMouseDown(e, 6)} />
                       </td>
                       <td className="text-right align-middle">
                         <CurrencyCell
@@ -1078,6 +1088,7 @@ export default function Transactions() {
                           onChange={(v) => handleEdit(tx.id, 'debit_amount', v)}
                           className="text-sm"
                         />
+                        <div className="col-resize-handle" onMouseDown={(e) => handleResizeMouseDown(e, 7)} />
                       </td>
                       <td className="text-right align-middle">
                         <CurrencyCell
@@ -1085,6 +1096,7 @@ export default function Transactions() {
                           onChange={(v) => handleEdit(tx.id, 'credit_amount', v)}
                           className="text-sm"
                         />
+                        <div className="col-resize-handle" onMouseDown={(e) => handleResizeMouseDown(e, 8)} />
                       </td>
                     </tr>
                   );

@@ -28,6 +28,50 @@ const statusColors = {
   error: 'badge-error',
 };
 
+// Global column resizer handler (works from any cell td or th inside the table)
+export function handleResizeMouseDown(e, colIndex) {
+  e.preventDefault();
+  e.stopPropagation();
+  const startX = e.clientX;
+  const cell = e.target.closest('td, th');
+  if (!cell) return;
+  const table = cell.closest('table');
+  if (!table) return;
+  const ths = table.querySelectorAll('thead th');
+  const th = ths[colIndex];
+  if (!th) return;
+  const startWidth = th.offsetWidth;
+
+  function onMouseMove(ev) {
+    const newWidth = Math.max(60, startWidth + (ev.clientX - startX));
+    th.style.width = `${newWidth}px`;
+  }
+
+  function onMouseUp() {
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+  }
+
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mouseup', onMouseUp);
+}
+
+// Resizable column header
+function ResizableTh({ children, className, initialWidth, colIndex }) {
+  const ref = useRef(null);
+
+  return (
+    <th ref={ref} className={`relative select-none ${className || ''}`}
+      style={{ width: initialWidth, minWidth: 60 }}>
+      {children}
+      <div
+        className="col-resize-handle"
+        onMouseDown={(e) => handleResizeMouseDown(e, colIndex)}
+      />
+    </th>
+  );
+}
+
 export default function BankStatements() {
   const { selectedCompanyId, selectedCompany } = useCompany();
   const navigate = useNavigate();
@@ -765,12 +809,12 @@ if __name__ == '__main__':
                       }
                     </button>
                   </th>
-                  <th>Filename</th>
-                  <th>Company</th>
-                  <th>Type</th>
-                  <th>Uploaded</th>
-                  <th>Status</th>
-                  <th className="text-right">Actions</th>
+                  <ResizableTh initialWidth={320} colIndex={1}>Filename</ResizableTh>
+                  <ResizableTh initialWidth={160} colIndex={2}>Company</ResizableTh>
+                  <ResizableTh initialWidth={80} colIndex={3}>Type</ResizableTh>
+                  <ResizableTh initialWidth={140} colIndex={4}>Uploaded</ResizableTh>
+                  <ResizableTh initialWidth={120} colIndex={5}>Status</ResizableTh>
+                  <ResizableTh initialWidth={120} className="text-right" colIndex={6}>Actions</ResizableTh>
                 </tr>
               </thead>
               <tbody>
@@ -814,17 +858,26 @@ if __name__ == '__main__':
                             </span>
                           )}
                         </div>
+                        <div className="col-resize-handle" onMouseDown={(e) => handleResizeMouseDown(e, 1)} />
                       </td>
-                      <td className="text-zinc-600">{stmt.company_name}</td>
+                      <td className="text-zinc-600">
+                        {stmt.company_name}
+                        <div className="col-resize-handle" onMouseDown={(e) => handleResizeMouseDown(e, 2)} />
+                      </td>
                       <td>
                         <span className="text-xs uppercase font-medium text-zinc-500">{stmt.file_type}</span>
+                        <div className="col-resize-handle" onMouseDown={(e) => handleResizeMouseDown(e, 3)} />
                       </td>
-                      <td className="text-zinc-600">{formatDate(stmt.uploaded_at)}</td>
+                      <td className="text-zinc-600">
+                        {formatDate(stmt.uploaded_at)}
+                        <div className="col-resize-handle" onMouseDown={(e) => handleResizeMouseDown(e, 4)} />
+                      </td>
                       <td>
                         <span className={statusColors[stmt.status]}>
                           <StatusIcon className="w-3 h-3 inline mr-1" strokeWidth={2} />
                           {stmt.status}
                         </span>
+                        <div className="col-resize-handle" onMouseDown={(e) => handleResizeMouseDown(e, 5)} />
                       </td>
                       <td className="text-right">
                         <div className="flex items-center justify-end gap-1">
@@ -876,6 +929,7 @@ if __name__ == '__main__':
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
+                        <div className="col-resize-handle" onMouseDown={(e) => handleResizeMouseDown(e, 6)} />
                       </td>
                     </tr>
                   );
