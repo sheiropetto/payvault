@@ -669,8 +669,9 @@ function extractPayee(desc) {
     }
   }
 
-  // ── DUITNOW TRSF DR XXXXXX PAYEE_NAME [PURPOSE] ──
-  let m = du.match(/DUITNOW\s+TRSF\s+DR\s+\d{6}\s+(.+)/);
+  // ── DUITNOW TRSF DR [XXXXXX] PAYEE_NAME [PURPOSE] ──
+  // Note: the 6-digit ref may be on a different Y-line in pdf.js, so make it optional
+  let m = du.match(/DUITNOW\s+TRSF\s+DR\s+(?:\d{6}\s+)?(.+)/);
   if (m) {
     let payee = m[1].trim();
     // Strategy: the payee is a person/company name. Everything after it
