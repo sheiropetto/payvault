@@ -48,24 +48,21 @@ Extract the payee name from the description:
 - Payee should be a clean person or company name, max 50 chars
 - If no payee can be determined, use ""
 
-## EXAMPLES
+## OUTPUT FORMAT EXAMPLE (FICTITIOUS — DO NOT COPY THESE INTO YOUR OUTPUT)
+These are FORMAT ILLUSTRATIONS ONLY. They use impossible dates/amounts and fake names. NEVER include these in your response.
 
 Input:
-[1] 02/10 | DEBIT | 3000.00 | TSFR FUND DR-ATM/EFT 060007 4889XXXXXX SAHARI BIN AHMAD PAYMENT
-[2] 04/10 | CREDIT | 50000.00 | TSFR FUND CR-ATM/EFT 696205 3149XXXXXX MAHIRIBU SDN BHD PAYMENT
-[3] 04/10 | DEBIT | 0.50 | CHQ PROCESS FEE DR 344367
-[4] 11/10 | DEBIT | 3240.00 | DR-ECP 704127 2310111450160437 KUMPULAN WANG SIMPANAN PEKERJA 1020230023390957C129706883 NO DEFINE
+[1] 99/99 | DEBIT | 9999.99 | TSFR FUND DR-ATM/EFT 999999 9999XXXXXX EXAMPLE PAYEE NAME
+[2] 99/99 | CREDIT | 8888.88 | TSFR FUND CR-ATM/EFT 888888 8888XXXXXX EXAMPLE COMPANY NAME
 
 Output:
 [
-  {"idx":1,"date":"2023-10-02","description":"TSFR FUND DR-ATM/EFT 060007 4889XXXXXX SAHARI BIN AHMAD PAYMENT","debit_amount":3000.00,"credit_amount":0,"category":"Fund Transfer","payee":"SAHARI BIN AHMAD"},
-  {"idx":2,"date":"2023-10-04","description":"TSFR FUND CR-ATM/EFT 696205 3149XXXXXX MAHIRIBU SDN BHD PAYMENT","debit_amount":0,"credit_amount":50000.00,"category":"Credit/Deposit","payee":"MAHIRIBU SDN BHD"},
-  {"idx":3,"date":"2023-10-04","description":"CHQ PROCESS FEE DR 344367","debit_amount":0.50,"credit_amount":0,"category":"Bank Fee","payee":""},
-  {"idx":4,"date":"2023-10-11","description":"DR-ECP 704127 KUMPULAN WANG SIMPANAN PEKERJA","debit_amount":3240.00,"credit_amount":0,"category":"Payment","payee":"KUMPULAN WANG SIMPANAN PEKERJA"}
+  {"idx":1,"date":"2099-12-31","description":"TSFR FUND DR-ATM/EFT 999999 EXAMPLE PAYEE NAME","debit_amount":9999.99,"credit_amount":0,"category":"Fund Transfer","payee":"EXAMPLE PAYEE NAME"},
+  {"idx":2,"date":"2099-12-31","description":"TSFR FUND CR-ATM/EFT 888888 EXAMPLE COMPANY NAME","debit_amount":0,"credit_amount":8888.88,"category":"Credit/Deposit","payee":"EXAMPLE COMPANY NAME"}
 ]
 
 ## CRITICAL RULES
-1. Return EXACTLY the same number of transactions as the input. NO skipping, NO adding.
+1. Return EXACTLY the same number of transactions as the input below. NO skipping, NO adding, NO inventing. Only process transactions that appear in the input — NEVER include the format example transactions (they use fake 99/99 dates).
 2. The IDX in your output MUST match the IDX in the input.
 3. The date, type (debit/credit), and amount MUST match the input exactly.
 4. DEBIT transactions: set debit_amount = input amount, credit_amount = 0
@@ -87,7 +84,10 @@ If you receive raw statement text (not the clean [IDX] format), parse it using t
 - FPX lines with no balance change are NOT transactions — skip them.
 - DEP-CASH, DEP-ECP are CREDITS.
 - DR-ECP is always DEBIT.
-- Extract EVERY transaction visible in the statement — aim for the count mentioned in the summary (e.g., "56 debits, 16 credits").`;
+- Extract EVERY transaction visible in the statement — aim for the count mentioned in the summary (e.g., "56 debits, 16 credits").
+
+## ANTI-HALLUCINATION (CRITICAL)
+The format example above uses FAKE DATA (dates 99/99, amounts 9999.99, names like EXAMPLE). These are NOT real transactions. If your output contains ANY transaction with payee "EXAMPLE", date "2099", or amount 9999.99, you have FAILED. Only output transactions from the ACTUAL input text below.`;
 
 // ─── Pre-processor: parse Public Bank raw text into clean structured transactions ───
 // Uses the RUNNING BALANCE as ground truth to determine debit/credit and amounts.
@@ -161,7 +161,7 @@ function preprocessPublicBankText(rawText) {
 
     // CRITICAL: description must contain a transaction code. This filters out
     // summary numbers (e.g., "12,051.82 414,950.05") that happen to match the regex.
-    const TX_CODES = /\b(TSFR|DUITNOW|GIRO|DR-ECP|DEP-ECP|CHEQ|CHQ|LOAN|AUTOMATED|FPX|IBG|ATM|DEP-CASH|KUMPULAN|PERTUBUHAN|LEMBAGA|MAXIS|MISC)\b/i;
+    const TX_CODES = /\b(TSFR|DUITNOW|GIRO|DR-ECP|DEP-ECP|CHEQ|CHQ|LOAN|AUTOMATED|FPX|IBG|ATM|DEP-CASH|KUMPULAN|PERTUBUHAN|LEMBAGA|MAXIS|MISC|RMT)\b/i;
     if (!TX_CODES.test(desc)) continue;
 
     entries.push({
@@ -902,7 +902,13 @@ export async function onRequest(context) {
       }
 
       // Call AI with full SYSTEM_PROMPT (handles both clean and raw formats)
-      if (selectedProvider === 'deepseek') {
+      // When preprocessor succeeds, skip AI entirely — use JS rules for categories/payees.
+      // This eliminates hallucination risk since the preprocessor already has authoritative amounts.
+      if (usePreprocessor) {
+        // Bypass AI: use empty transactions array so merge falls back to JS rules
+        transactions = [];
+        provider = 'preprocessor';
+      } else if (selectedProvider === 'deepseek') {
         const deepseekKey = env.DEEPSEEK_API_KEY;
         if (!deepseekKey) return Response.json({ error: 'DEEPSEEK_API_KEY not configured' }, { status: 500 });
         const result = await callDeepSeek(deepseekKey, aiPromptText);
@@ -922,6 +928,15 @@ export async function onRequest(context) {
       if (usePreprocessor) {
         transactions = mergePreprocessedWithAI(preprocessed, transactions, pdfText);
         corrections = []; // pre-processor already handles amount accuracy
+
+        // SAFETY NET: filter out any transaction whose idx doesn't match the preprocessor.
+        // This prevents AI-hallucinated transactions from leaking into the DB.
+        const validIdx = new Set(preprocessed.map(tx => tx.idx));
+        const before = transactions.length;
+        transactions = transactions.filter(tx => validIdx.has(tx.idx));
+        if (transactions.length < before) {
+          console.warn(`[extract] Filtered out ${before - transactions.length} transactions with no matching preprocessor idx`);
+        }
       } else {
         transactions.sort((a, b) => (a.idx || 0) - (b.idx || 0));
         corrections = validateAndCorrect(transactions, pdfText);
