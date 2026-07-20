@@ -112,7 +112,7 @@ function preprocessPublicBankText(rawText) {
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
-    if (!line || (SKIP_LINE.test(line) && entries.length === 0 && !currentDate)) continue;
+    if (!line || (SKIP_LINE.test(line) && !(entries.length > 0 && /\bRAZ\s+UTAMA\b/i.test(line)))) continue;
 
     // Try date + desc + amount + balance (pdf.js format: desc before amounts)
     let m = txWithDate.exec(line);
