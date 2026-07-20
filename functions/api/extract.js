@@ -737,7 +737,7 @@ function extractPayee(desc) {
   }
 
   // ── TSFR FUND DR/CR-ATM/EFT ──
-  m = du.match(/TSFR\s+FUND\s+(?:DR|CR)(?:-ATM\/EFT)?\s+\d{6}\s+(?:\w*X{2,}\w*\s+)?(.+)/);
+  m = du.match(/TSFR\s+FUND\s+(?:DR|CR)(?:-ATM\/EFT)?\s+(?:\d{6}\s+)?(?:\w*X{2,}\w*\s+)?(.+)/);
   if (m) {
     let name = m[1];
     name = name.replace(/^(IBG|SCB|CGB|WARRANT|TRANSFER|EFT)\s+/i, '');
