@@ -130,6 +130,18 @@ def clean_extracted_name(name):
     name = purpose_pattern.sub('', name)
     name = re.sub(r'\\s+\\b(?=[A-Z]*\\d)(?=\\d*[A-Z])[A-Z0-9_-]{5,}\\b.*$', '', name, flags=re.IGNORECASE)
     name = re.sub(r'\\s+', ' ', name).strip()
+    
+    # Apply name mappings/corrections for truncated payees
+    mappings = {
+        'MUHAMMAD RAIMIEY BIN': 'MUHAMMAD RAIMIEY',
+        'FARZIEYANA BINTI MOH': 'FARZIEYANA BINTI MOHD ARIFF',
+        'SITI MARDIANASARI BI': 'SITI MARDIANASARI',
+        'AILYN BINTI ABD.MAJI': 'AILYN BINTI ABD MAJID'
+    }
+    upper_name = name.upper()
+    if upper_name in mappings:
+        return mappings[upper_name]
+        
     return name
 
 def extract_payee(desc):

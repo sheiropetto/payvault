@@ -679,6 +679,19 @@ function cleanExtractedName(name) {
   
   // Clean up double spaces
   name = name.replace(/\s+/g, ' ').trim();
+  
+  // Apply name mappings/corrections for truncated payees
+  const mappings = {
+    'MUHAMMAD RAIMIEY BIN': 'MUHAMMAD RAIMIEY',
+    'FARZIEYANA BINTI MOH': 'FARZIEYANA BINTI MOHD ARIFF',
+    'SITI MARDIANASARI BI': 'SITI MARDIANASARI',
+    'AILYN BINTI ABD.MAJI': 'AILYN BINTI ABD MAJID'
+  };
+  const upperName = name.toUpperCase();
+  if (mappings[upperName]) {
+    return mappings[upperName];
+  }
+  
   return name;
 }
 
