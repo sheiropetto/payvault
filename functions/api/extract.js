@@ -150,7 +150,10 @@ function preprocessPublicBankText(rawText) {
     }
 
     // Bare continuation line (reference numbers, etc.) — append to last entry
+    // But skip footer/boilerplate text that shouldn't be part of any transaction
     if (entries.length > 0 && line.length > 2 && !/^[\d,]+\.\d{2}/.test(line)) {
+      // Footer text patterns — don't append to descriptions
+      if (/^(Balance\s+C\/F|Closing\s+Balance|Penyata\s+ini\s+dicetak|Tandatangan\s+tidak|This\s+is\s+a\s+computer|No\s+signature|Baki\s+Harian|Daily\s+And\s+Closing|Terima\s+Kasih|Thank\s+You\s+For|Anda\s+boleh|You\s+may|PERHATIAN|Dimaklumkan|Please\s+be\s+informed)/i.test(line)) continue;
       entries[entries.length - 1].desc += ' ' + line;
     }
   }
