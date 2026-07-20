@@ -674,6 +674,9 @@ function cleanExtractedName(name) {
   name = name.replace(/DUITNOW\s*\(.*/i, '');
   name = name.replace(/Balance\s+C\/F.*/i, '');
   
+  // Strip page header/footer boilerplate that leaked into descriptions
+  name = name.replace(/\b(KL\s+CITY\s+MAIN\s+OFFICE|GRD\s+FLOOR\s+MENARA\s+PUBLIC\s+BANK|\d+\s+JLN\s+AMPANG|\d{5}\s+KUALA\s+LUMPUR|TEL:\s*[\d-]+|Dilindungi\s+oleh\s+PIDM|Protected\s+by\s+PIDM|PENYATA\s+AKAUN|Nombor\s+Akaun|Jenis\s+Akaun|Tarikh\s+Penyata|Muka\s+Surat|Page\s+\d+|Penyata\s+ini\s+dicetak|Tandatangan\s+tidak)\b.*/i, '');
+  
   // Strip purpose and trailing text
   name = name.replace(purposePattern, '');
   
