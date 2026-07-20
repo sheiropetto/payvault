@@ -112,7 +112,7 @@ function preprocessPublicBankText(rawText) {
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
-    if (!line || SKIP_LINE.test(line)) continue;
+    if (!line || (SKIP_LINE.test(line) && entries.length === 0 && !currentDate)) continue;
 
     // Try date + desc + amount + balance (pdf.js format: desc before amounts)
     let m = txWithDate.exec(line);
@@ -673,10 +673,12 @@ function extractPayee(desc) {
   let m = du.match(/DUITNOW\s+TRSF\s+DR\s+\d{6}\s+(.+)/);
   if (m) {
     let payee = m[1].trim();
-    // Strip trailing purpose keywords
-    payee = payee.replace(/\s+(PAYMENT|PYMT|PETTY\s+CASH|SALARY|CLAIM|RENTAL|INSTALLMENT|EXPENSES|ALLOWANCE|CERT|FEE|COURSE|SERVICE|DOWNPYMT|PARKING|CHECK\s+SOLAR|BIL\s+TM|INSOLVENSI|ELAUN|CLEANER|MONTLY|TENDER|AUDIT|ROADTAX|INSURANCE|PRINT|COMPANY|PROFILE|SABAH|TIKET|GALA|DINNER|SPAN|HSE|LOAN|SCORE|PRINTER|IMIGRESEN|MASSIVE|OFFICE|CYBER|TNB|INDAH|WATER|IWK).*/i, '');
-    // Strip trailing reference numbers
-    payee = payee.replace(/\s+\d{10,}.*$/i, '');
+    // Strategy: the payee is a person/company name. Everything after it
+    // is purpose text (PAYMENT, SALARY, RENTAL, etc.) or reference numbers.
+    // Strip: 1) trailing purpose keywords, 2) reference numbers, 3) DUITNOW markers
+    payee = payee.replace(/\s+(PAYMENT|PYMT|PETTY\s*CASH|SALARY|CLAIM|RENTAL|INSTALLMENT|EXPENSES|ALLOWANCE|CERT|FEE|COURSE|SERVICE|DOWNPYMT|PARKING|CHECK\s+SOLAR|BIL\s+TM|INSOLVENSI|ELAUN|CLEANER|MONTLY|TENDER|AUDIT|ROADTAX|INSURANCE|PRINT|COMPANY|PROFILE|SABAH|TIKET|GALA|DINNER|SPAN|HSE|LOAN|SCORE|PRINTER|IMIGRESEN|MASSIVE|OFFICE|CYBER|TNB|INDAH|WATER|IWK|PETTY|CASH|BIL|OFFICE|CTC|AZ|FOR|ICE|NATHAN|TRANSFER|FUND|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|JAN24|JANUARY|FEBRUARY|MARCH|APRIL|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER).*/i, '');
+    // Strip trailing reference numbers (bank codes like PBBEMYKL...)
+    payee = payee.replace(/\s+[A-Z]{2,}[A-Z0-9]{5,}.*$/i, '');
     // Strip DUITNOW markers
     payee = payee.replace(/\bDUITNOW\b.*$/i, '');
     if (payee.length >= 3) return payee.trim().slice(0, 50);
@@ -686,10 +688,12 @@ function extractPayee(desc) {
   m = du.match(/TSFR\s+FUND\s+DR-ATM\/EFT\s+\d{6}\s+(?:[A-Z0-9]{8,12}\s+)?(.+)/);
   if (m) {
     let payee = m[1].trim();
-    // Strip trailing purpose keywords
-    payee = payee.replace(/\s+(PAYMENT|PYMT|EXPENSES|SALARY|WORKERS\s+SALARY|HOTEL\s+PYMT).*/i, '');
+    // Strip trailing purpose keywords (same broad list)
+    payee = payee.replace(/\s+(PAYMENT|PYMT|EXPENSES|SALARY|WORKERS\s+SALARY|HOTEL\s+PYMT|TRANSFER|SCB|CGB|WARRANT|IBG|RAZ\s+UTAMA|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC).*/i, '');
     // Strip trailing reference numbers
-    payee = payee.replace(/\s+[A-Z]{2,3}\d{4,}.*$/i, '');
+    payee = payee.replace(/\s+[A-Z]{2,}[A-Z0-9]{5,}.*$/i, '');
+    // Strip common prefixes that leak through
+    payee = payee.replace(/^(IBG|SCB|CGB|WARRANT|TRANSFER|EFT)\s+/i, '');
     if (payee.length >= 3) return payee.trim().slice(0, 50);
   }
 
