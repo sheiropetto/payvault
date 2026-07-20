@@ -37,7 +37,7 @@ export default function BankStatements() {
   const [confirm, setConfirm] = useState(null);
   const [extracting, setExtracting] = useState(null);
   const [extractStep, setExtractStep] = useState(''); // 'download' | 'extract-text' | 'ai-call' | 'saving'
-  const [extractProvider, setExtractProvider] = useState('deepseek'); // 'deepseek' | 'gemini'
+  const [extractProvider, setExtractProvider] = useState('preprocessor'); // 'preprocessor' | 'deepseek' | 'gemini' | 'pypdf'
   const [statusMsg, setStatusMsg] = useState(null);
   const [retryStmt, setRetryStmt] = useState(null); // { stmt }
   const [selectedYear, setSelectedYear] = useState('');
@@ -101,6 +101,143 @@ export default function BankStatements() {
   }
 
   async function handleExtract(stmt) {
+    // Python pypdf: download the script for local use
+    if (extractProvider === 'pypdf') {
+      const PYTHON_SCRIPT = `import re
+import pypdf
+import pandas as pd
+
+def parse_public_bank_statement(pdf_path):
+    reader = pypdf.PdfReader(pdf_path)
+    full_text = ""
+    for page in reader.pages:
+        full_text += page.extract_text() + "\\n"
+    lines = full_text.split('\\n')
+
+    tx_with_date = re.compile(
+        r'^(\\d{2}/\\d{2})\\s*([\\d,]+\\.\\d{2})\\s*([\\d,]+\\.\\d{2})\\s*(.*)$')
+    tx_no_date = re.compile(
+        r'^([\\d,]+\\.\\d{2})\\s*([\\d,]+\\.\\d{2})\\s*(.*)$')
+    TX_CODES = re.compile(
+        r'\\b(TSFR|DUITNOW|GIRO|DR-ECP|DEP-ECP|CHEQ|CHQ|LOAN|AUTOMATED|'
+        r'FPX|IBG|ATM|DEP-CASH|RMT|MISC|KUMPULAN|PERTUBUHAN|LEMBAGA|MAXIS)\\b')
+
+    SKIP = re.compile(r'^(TEGASAN|RINGKASAN|Jumlah|Baki|This is a computer|'
+        r'No signature|PeeBee|Page \\\\d|PENYATA|Nombor|Jenis|Tarikh|Muka|'
+        r'Dilindungi|Protected|Terima|Thank|Your banking|Anda boleh|You may|'
+        r'PERHATIAN|Dimaklumkan|Please be|sifar|tolerance|DATE TRANSACTION|'
+        r'TARIKH URUS|RAZ UTAMA|KL CITY|GRD FLOOR|BOX \\\\d|TEL:|Join the|'
+        r'Campaign|^\\\\d+$)')
+
+    entries = []
+    current_date = None
+
+    for line in lines:
+        line = line.strip()
+        if not line or SKIP.match(line):
+            continue
+        m = tx_with_date.match(line)
+        if m:
+            current_date = m.group(1)
+            amount = float(m.group(2).replace(',', ''))
+            balance = float(m.group(3).replace(',', ''))
+            desc = m.group(4).strip()
+            if desc and len(desc) >= 2 and TX_CODES.search(desc):
+                entries.append({'date': current_date, 'amount': amount,
+                               'balance': balance, 'desc': desc})
+            continue
+        m = tx_no_date.match(line)
+        if m and current_date:
+            amount = float(m.group(1).replace(',', ''))
+            balance = float(m.group(2).replace(',', ''))
+            desc = m.group(3).strip()
+            if desc and len(desc) >= 2:
+                if desc.startswith('Balance'):
+                    continue
+                if TX_CODES.search(desc):
+                    entries.append({'date': current_date, 'amount': amount,
+                                   'balance': balance, 'desc': desc})
+                elif entries:
+                    entries[-1]['desc'] += ' ' + desc
+            continue
+        if entries and len(line) > 2 and not re.match(r'^[\\d,]+\\.\\d{2}', line):
+            entries[-1]['desc'] += ' ' + line
+
+    if len(entries) < 3:
+        raise ValueError("Could not find enough transactions")
+
+    bfl = re.search(r'Balance\\s+From\\s+Last\\s+Statement\\s+([\\d,]+\\.\\d{2})',
+                    full_text, re.IGNORECASE)
+    if bfl:
+        entries.insert(0, {'date': entries[0]['date'], 'amount': 0,
+                          'balance': float(bfl.group(1).replace(',', '')), 
+                          'desc': 'BALANCE_FROM_LAST_STATEMENT', '_ref': True})
+
+    records = []
+    prev_balance = None
+    for e in entries:
+        if e.get('_ref'):
+            prev_balance = e['balance']
+            continue
+        if prev_balance is not None:
+            delta = e['balance'] - prev_balance
+            if delta < -0.005:
+                dr, cr = abs(delta), 0.0
+            elif delta > 0.005:
+                dr, cr = 0.0, delta
+            else:
+                desc_up = e['desc'].upper()
+                if any(kw in desc_up for kw in ['CR', 'CDT', 'DEP-']):
+                    dr, cr = 0.0, e['amount']
+                else:
+                    dr, cr = e['amount'], 0.0
+        else:
+            desc_up = e['desc'].upper()
+            if any(kw in desc_up for kw in ['CR', 'CDT', 'DEP-']):
+                dr, cr = 0.0, e['amount']
+            else:
+                dr, cr = e['amount'], 0.0
+        if dr + cr >= 0.005:
+            records.append({'Date': e['date'], 'Description': e['desc'][:150],
+                          'Withdrawal (DR)': round(dr, 2),
+                          'Deposit (CR)': round(cr, 2),
+                          'Balance': e['balance']})
+        prev_balance = e['balance']
+
+    df = pd.DataFrame(records)
+    return df
+
+if __name__ == '__main__':
+    import sys
+    if len(sys.argv) < 2:
+        print("Usage: python parse_pdf.py <pdf_file>")
+        sys.exit(1)
+    pdf_file = sys.argv[1]
+    df = parse_public_bank_statement(pdf_file)
+    csv_name = pdf_file.rsplit('.', 1)[0] + '_parsed.csv'
+    df.to_csv(csv_name, index=False)
+    dr = df['Withdrawal (DR)'].sum()
+    cr = df['Deposit (CR)'].sum()
+    print(f"Extracted {len(df)} transactions")
+    print(f"Debits: {dr:,.2f} ({len(df[df['Withdrawal (DR)'] > 0])})")
+    print(f"Credits: {cr:,.2f} ({len(df[df['Deposit (CR)'] > 0])})")
+    print(f"Saved to: {csv_name}")
+    print("Upload this CSV file to PayVault to import the transactions.")
+`;
+      const blob = new Blob([PYTHON_SCRIPT], { type: 'text/x-python' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'parse_pdf.py';
+      a.click();
+      URL.revokeObjectURL(url);
+      setStatusMsg({ 
+        type: 'success', 
+        text: 'Python script downloaded! Run: python parse_pdf.py your_statement.pdf\nThen upload the generated CSV to PayVault.' 
+      });
+      return;
+    }
+
     setExtracting(stmt.id);
     setExtractStep('download');
     setStatusMsg(null);
@@ -139,7 +276,7 @@ export default function BankStatements() {
       setTimeout(() => setStatusMsg(null), 5000);
     } catch (err) {
       console.error(err);
-      setStatusMsg({ type: 'error', text: stmt.file_type === 'pdf' ? `[${extractProvider === 'deepseek' ? 'DeepSeek' : 'Gemini'}] ${err.message}` : `[System] ${err.message}` });
+      setStatusMsg({ type: 'error', text: stmt.file_type === 'pdf' ? `[${extractProvider === 'deepseek' ? 'DeepSeek' : extractProvider === 'gemini' ? 'Gemini' : 'Auto'}] ${err.message}` : `[System] ${err.message}` });
       setRetryStmt({ stmt });
     } finally {
       setExtracting(null);
@@ -286,14 +423,14 @@ export default function BankStatements() {
           {/* AI Provider selector */}
           <div className="flex items-center gap-1.5 bg-zinc-100 rounded-lg p-0.5">
             <button
-              onClick={() => setExtractProvider('gemini')}
+              onClick={() => setExtractProvider('preprocessor')}
               className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
-                extractProvider === 'gemini'
+                extractProvider === 'preprocessor'
                   ? 'bg-white text-zinc-900 shadow-sm'
                   : 'text-zinc-500 hover:text-zinc-700'
               }`}
             >
-              Gemini
+              Auto
             </button>
             <button
               onClick={() => setExtractProvider('deepseek')}
@@ -304,6 +441,26 @@ export default function BankStatements() {
               }`}
             >
               DeepSeek
+            </button>
+            <button
+              onClick={() => setExtractProvider('gemini')}
+              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                extractProvider === 'gemini'
+                  ? 'bg-white text-zinc-900 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-700'
+              }`}
+            >
+              Gemini
+            </button>
+            <button
+              onClick={() => setExtractProvider('pypdf')}
+              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                extractProvider === 'pypdf'
+                  ? 'bg-white text-zinc-900 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-700'
+              }`}
+            >
+              Python pypdf
             </button>
           </div>
 
@@ -425,8 +582,8 @@ export default function BankStatements() {
                 {extractStep.startsWith('ai-call') && (
                   <><Sparkles className="w-3 h-3" strokeWidth={1.5} /> {
                     extractStep === 'ai-call'
-                      ? `${extractProvider === 'deepseek' ? 'DeepSeek' : 'Gemini'} is analyzing...`
-                      : `${extractProvider === 'deepseek' ? 'DeepSeek' : 'Gemini'} is analyzing page ${extractStep.replace('ai-call-', '').replace('-of-', ' of ')}...`
+                      ? `${extractProvider === 'deepseek' ? 'DeepSeek' : extractProvider === 'gemini' ? 'Gemini' : 'Auto'} is analyzing...`
+                      : `${extractProvider === 'deepseek' ? 'DeepSeek' : extractProvider === 'gemini' ? 'Gemini' : 'Auto'} is analyzing page ${extractStep.replace('ai-call-', '').replace('-of-', ' of ')}...`
                   }</>
                 )}
                 {extractStep === 'saving' && <><Save className="w-3 h-3" strokeWidth={1.5} /> Saving transactions...</>}

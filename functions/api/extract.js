@@ -853,7 +853,7 @@ export async function onRequest(context) {
       }
     } else {
       // ─── AI-powered PDF extraction ───
-      const selectedProvider = (preferredProvider || 'deepseek').toLowerCase();
+      const selectedProvider = (preferredProvider || 'preprocessor').toLowerCase();
 
       // Try pre-processor for amount accuracy; fall back to raw text if it fails
       const preprocessed = preprocessPublicBankText(pdfText);
@@ -873,9 +873,9 @@ export async function onRequest(context) {
       }
 
       // Call AI with full SYSTEM_PROMPT (handles both clean and raw formats)
-      // When preprocessor succeeds, skip AI entirely — use JS rules for categories/payees.
-      // This eliminates hallucination risk since the preprocessor already has authoritative amounts.
-      if (usePreprocessor) {
+      // 'preprocessor' (default): skip AI entirely, use JS rules for categories/payees.
+      // 'deepseek'/'gemini': use AI even when preprocessor succeeds (user override).
+      if (usePreprocessor && selectedProvider === 'preprocessor') {
         // Bypass AI: use empty transactions array so merge falls back to JS rules
         transactions = [];
         provider = 'preprocessor';
