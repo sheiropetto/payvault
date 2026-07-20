@@ -106,12 +106,12 @@
 
   .col-resize-handle::before {
     content: '';
-    @apply absolute right-0 top-0 bottom-0 w-px bg-zinc-200 transition-colors;
+    @apply absolute right-0 top-0 bottom-0 w-px bg-transparent transition-colors;
   }
 
   .col-resize-handle:hover::before,
   .col-resize-handle:active::before {
-    @apply bg-zinc-500 w-0.5;
+    @apply bg-zinc-400 w-0.5;
   }
 
   .sheet-grid tr:hover td {
