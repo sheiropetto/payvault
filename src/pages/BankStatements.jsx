@@ -254,10 +254,18 @@ if __name__ == '__main__':
             throw new Error('This PDF appears to be scanned or contains no selectable text. Please upload a structured (digital) PDF or a CSV file instead.');
           }
           let lastResult = null;
-          for (let i = 0; i < pages.length; i++) {
-            setExtractStep(`ai-call-${i + 1}-of-${pages.length}`);
-            const pageText = pages[i];
-            lastResult = await api.extractTransactions(stmt.id, pageText, i, pages.length, extractProvider);
+          // Preprocessor (Auto) needs all pages together for balance chain.
+          // AI providers process page-by-page to stay within token limits.
+          if (extractProvider === 'preprocessor') {
+            setExtractStep('ai-call');
+            const allText = pages.join('\n');
+            lastResult = await api.extractTransactions(stmt.id, allText, 0, 1, extractProvider);
+          } else {
+            for (let i = 0; i < pages.length; i++) {
+              setExtractStep(`ai-call-${i + 1}-of-${pages.length}`);
+              const pageText = pages[i];
+              lastResult = await api.extractTransactions(stmt.id, pageText, i, pages.length, extractProvider);
+            }
           }
           setExtractStep('saving');
           if (lastResult) {
