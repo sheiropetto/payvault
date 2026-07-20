@@ -681,7 +681,7 @@ function extractPayee(desc) {
     payee = payee.replace(/\s+[A-Z]{2,}[A-Z0-9]{5,}.*$/i, '');
     // Strip DUITNOW markers
     payee = payee.replace(/\bDUITNOW\b.*$/i, '');
-    if (payee.length >= 3) return payee.trim().slice(0, 50);
+    if (payee.length >= 3) return 'A_' + payee.trim().slice(0, 48);
   }
 
   // ── TSFR FUND DR-ATM/EFT XXXXXX [ACCT] PAYEE_NAME [PURPOSE] ──
@@ -694,7 +694,7 @@ function extractPayee(desc) {
     payee = payee.replace(/\s+[A-Z]{2,}[A-Z0-9]{5,}.*$/i, '');
     // Strip common prefixes that leak through
     payee = payee.replace(/^(IBG|SCB|CGB|WARRANT|TRANSFER|EFT)\s+/i, '');
-    if (payee.length >= 3) return payee.trim().slice(0, 50);
+    if (payee.length >= 3) return 'B_' + payee.trim().slice(0, 48);
   }
 
   // ── GIRO PYMT-ATM/EFT XXXXXX PAYEE ──
@@ -702,8 +702,8 @@ function extractPayee(desc) {
   if (m) {
     let payee = m[1].trim();
     // JOMPAY entries have no clear payee
-    if (/\bJOMPAY\b/.test(payee)) return '';
-    if (payee.length >= 2) return payee.slice(0, 50);
+    if (/\bJOMPAY\b/.test(payee)) return 'C_';
+    if (payee.length >= 2) return 'C_' + payee.slice(0, 48);
   }
 
   // ── RMT CR → KENANGA INVESTMENT BANK ──
@@ -731,7 +731,9 @@ function extractPayee(desc) {
   if (/\bFPX\b/.test(du)) return '';
 
   // ── Fallback: cleanPayeeName generic stripping ──
-  return cleanPayeeName(desc);
+  // If we reach here, extractPayee couldn't determine the payee.
+  // cleanPayeeName is the legacy fallback.
+  return 'z_' + cleanPayeeName(desc);
 }
 
 function cleanPayeeName(desc) {
