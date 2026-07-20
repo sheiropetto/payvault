@@ -153,20 +153,28 @@ def parse_public_bank_statement(pdf_path):
     
     transactions = []
     current_date = None
+    inside_transactions = True
     
     for line in lines:
         line = line.strip()
         if not line:
             continue
         
-        # Skip header/footer lines
-        if any(kw in line for kw in ['PENYATA AKAUN', 'TARIKH URUS', 'DATE TRANSACTION',
-                                       'Muka Surat', 'Page ', 'TERIMA KASIH', 'TEGASAN']):
+        line_upper = line.upper()
+        
+        # State machine check: are we crossing page boundaries/headers/footers?
+        if any(marker in line_upper for marker in ['BALANCE C/F', 'BAKI HANTAR HADAPAN', 'CLOSING BALANCE', 'BAKI AKHIR PENYATA', 'DAILY AND CLOSING BALANCES']):
+            inside_transactions = False
+            continue
+            
+        if any(marker in line_upper for marker in ['BALANCE B/F', 'BAKI BAWA HADAPAN']):
+            inside_transactions = True
             continue
         
         # Try date+amount+balance+desc pattern
         m = tx_start.match(line)
         if m:
+            inside_transactions = True
             current_date = m.group(1)
             amount = float(m.group(2).replace(',', ''))
             balance = float(m.group(3).replace(',', ''))
@@ -184,6 +192,7 @@ def parse_public_bank_statement(pdf_path):
         # Try amount+balance+desc pattern (no date, on same day)
         m2 = tx_cont.match(line)
         if m2 and current_date:
+            inside_transactions = True
             amount = float(m2.group(1).replace(',', ''))
             balance = float(m2.group(2).replace(',', ''))
             desc = m2.group(3).strip()
@@ -206,6 +215,27 @@ def parse_public_bank_statement(pdf_path):
                 elif transactions:
                     # Continuation line for previous transaction
                     transactions[-1]['cont_lines'].append(desc)
+            continue
+            
+        # If we are not inside transactions (e.g. footers, headers), skip all other text lines
+        if not inside_transactions:
+            continue
+            
+        # Skip other known header/footer/metadata lines even if inside_transactions is True
+        if any(kw in line_upper for kw in [
+            'PENYATA AKAUN', 'TARIKH URUS', 'DATE TRANSACTION',
+            'MUKA SURAT', 'PAGE ', 'TERIMA KASIH', 'TEGASAN',
+            'RAZ UTAMA SDN BHD', 'KL CITY MAIN OFFICE', 'GRD FLOOR MENARA PUBLIC BANK',
+            '146 JLN AMPANG', '50450 KUALA LUMPUR', 'TEL: 03-21767888',
+            'DILINDUNGI OLEH PIDM', 'PROTECTED BY PIDM',
+            'NOMBOR AKAUN', 'ACCOUNT NUMBER',
+            'TARIKH PENYATA', 'STATEMENT DATE',
+            'TERIMA KASIH KERANA BERURUS NIAGA', 'THANK YOU FOR BANKING',
+            'KECEMERLANGAN ADALAH ILTIZAM KAMI', 'EXCELLENCE IS OUR COMMITMENT',
+            'KEMUSYKILAN ANDA MENGENAI', 'YOUR BANKING QUESTIONS ANSWERED',
+            'ANDA BOLEH MELIHAT NOTIS PRIVASI', 'YOU MAY VIEW PUBLIC BANK\'S PRIVACY NOTICE',
+            'PERHATIAN / ATTENTION', 'ANTI-RASUAH DAN ANTI-SOGOKAN', 'ANTI-BRIBERY AND ANTI-CORRUPTION POLICY'
+        ]):
             continue
             
         if transactions and len(line) > 2 and not re.match(r'^[\d,]+\.\d{2}', line):
