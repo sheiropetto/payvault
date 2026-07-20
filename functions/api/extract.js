@@ -879,20 +879,41 @@ export async function onRequest(context) {
         // Bypass AI: use empty transactions array so merge falls back to JS rules
         transactions = [];
         provider = 'preprocessor';
-      } else if (selectedProvider === 'deepseek') {
-        const deepseekKey = env.DEEPSEEK_API_KEY;
-        if (!deepseekKey) return Response.json({ error: 'DEEPSEEK_API_KEY not configured' }, { status: 500 });
-        const result = await callDeepSeek(deepseekKey, aiPromptText);
-        provider = 'deepseek';
-        transactions = result.transactions;
-      } else {
-        if (!env.GEMINI_API_KEY) {
-          return Response.json({ error: 'GEMINI_API_KEY not configured' }, { status: 500 });
+      } else if (usePreprocessor && (selectedProvider === 'deepseek' || selectedProvider === 'gemini')) {
+        // User explicitly chose AI — call it for categorization on top of preprocessor amounts
+        if (selectedProvider === 'deepseek') {
+          const deepseekKey = env.DEEPSEEK_API_KEY;
+          if (!deepseekKey) return Response.json({ error: 'DEEPSEEK_API_KEY not configured' }, { status: 500 });
+          const result = await callDeepSeek(deepseekKey, aiPromptText);
+          provider = 'deepseek';
+          transactions = result.transactions;
+        } else {
+          if (!env.GEMINI_API_KEY) {
+            return Response.json({ error: 'GEMINI_API_KEY not configured' }, { status: 500 });
+          }
+          const result = await callGemini(env.GEMINI_API_KEY, aiPromptText);
+          provider = 'gemini';
+          transactions = result.transactions;
         }
-        const geminiKey = env.GEMINI_API_KEY;
-        const result = await callGemini(geminiKey, aiPromptText);
-        provider = 'gemini';
-        transactions = result.transactions;
+      } else if (!usePreprocessor && (selectedProvider === 'deepseek' || selectedProvider === 'gemini')) {
+        // Preprocessor failed, fall back to AI for full extraction
+        if (selectedProvider === 'deepseek') {
+          const deepseekKey = env.DEEPSEEK_API_KEY;
+          if (!deepseekKey) return Response.json({ error: 'DEEPSEEK_API_KEY not configured' }, { status: 500 });
+          const result = await callDeepSeek(deepseekKey, aiPromptText);
+          provider = 'deepseek';
+          transactions = result.transactions;
+        } else {
+          if (!env.GEMINI_API_KEY) {
+            return Response.json({ error: 'GEMINI_API_KEY not configured' }, { status: 500 });
+          }
+          const result = await callGemini(env.GEMINI_API_KEY, aiPromptText);
+          provider = 'gemini';
+          transactions = result.transactions;
+        }
+      } else {
+        // Preprocessor failed and no AI selected — can't extract
+        return Response.json({ error: 'Could not parse this statement. The Auto parser could not identify enough transactions. Try using DeepSeek or Gemini, or use Python pypdf for local extraction.' }, { status: 422 });
       }
 
       // Layer 2: Merge pre-processed amounts with AI categories/payees
