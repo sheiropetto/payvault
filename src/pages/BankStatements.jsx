@@ -266,96 +266,162 @@ def parse_public_bank_statement(pdf_path):
         full_text += page.extract_text() + "\\n"
     lines = full_text.split('\\n')
 
-    tx_with_date = re.compile(
-        r'^(\\d{2}/\\d{2})\\s*([\\d,]+\\.\\d{2})\\s*([\\d,]+\\.\\d{2})\\s*(.*)$')
-    tx_no_date = re.compile(
-        r'^([\\d,]+\\.\\d{2})\\s*([\\d,]+\\.\\d{2})\\s*(.*)$')
-    TX_CODES = re.compile(
-        r'\\b(TSFR|DUITNOW|GIRO|DR-ECP|DEP-ECP|CHEQ|CHQ|LOAN|AUTOMATED|'
-        r'FPX|IBG|ATM|DEP-CASH|RMT|MISC|KUMPULAN|PERTUBUHAN|LEMBAGA|MAXIS)\\b')
+    # Pattern: [DD/MM] AMOUNT BALANCE [DESCRIPTION]
+    tx_start = re.compile(
+        r'^(\\d{2}/\\d{2})\\s+'           # Group 1: date DD/MM
+        r'([\\d,]+\\.\\d{2})\\s+'          # Group 2: amount
+        r'([\\d,]+\\.\\d{2})'             # Group 3: balance (no space before desc!)
+        r'(.*)$'                        # Group 4: description (rest of line)
+    )
+    
+    # Also match lines without date (continuation or date-less)
+    tx_cont = re.compile(
+        r'^([\\d,]+\\.\\d{2})\\s+'          # Group 1: amount
+        r'([\\d,]+\\.\\d{2})'             # Group 2: balance
+        r'(.*)$'                        # Group 3: description
+    )
 
-    SKIP = re.compile(r'^(TEGASAN|RINGKASAN|Jumlah|Baki|This is a computer|'
-        r'No signature|PeeBee|Page \\\\d|PENYATA|Nombor|Jenis|Tarikh|Muka|'
-        r'Dilindungi|Protected|Terima|Thank|Your banking|Anda boleh|You may|'
-        r'PERHATIAN|Dimaklumkan|Please be|sifar|tolerance|DATE TRANSACTION|'
-        r'TARIKH URUS|RAZ UTAMA|KL CITY|GRD FLOOR|BOX \\\\d|TEL:|Join the|'
-        r'Campaign|^\\\\d+$)')
-
-    entries = []
+    transactions = []
     current_date = None
+    inside_transactions = True
 
     for line in lines:
         line = line.strip()
-        if not line or SKIP.match(line):
+        if not line:
             continue
-        m = tx_with_date.match(line)
+
+        line_upper = line.upper()
+
+        # State machine check: are we crossing page boundaries/headers/footers?
+        if any(marker in line_upper for marker in ['BALANCE C/F', 'BAKI HANTAR HADAPAN', 'CLOSING BALANCE', 'BAKI AKHIR PENYATA', 'DAILY AND CLOSING BALANCES']):
+            inside_transactions = False
+            continue
+
+        if any(marker in line_upper for marker in ['BALANCE B/F', 'BAKI BAWA HADAPAN']):
+            inside_transactions = True
+            continue
+
+        # Try date+amount+balance+desc pattern
+        m = tx_start.match(line)
         if m:
+            inside_transactions = True
             current_date = m.group(1)
             amount = float(m.group(2).replace(',', ''))
             balance = float(m.group(3).replace(',', ''))
             desc = m.group(4).strip()
-            if desc and len(desc) >= 2 and TX_CODES.search(desc):
-                entries.append({'date': current_date, 'amount': amount,
-                               'balance': balance, 'desc': desc})
+            if desc and len(desc) > 2:
+                transactions.append({
+                    'date': current_date,
+                    'amount': amount,
+                    'balance': balance,
+                    'desc': desc,
+                    'cont_lines': []
+                })
             continue
-        m = tx_no_date.match(line)
-        if m and current_date:
-            amount = float(m.group(1).replace(',', ''))
-            balance = float(m.group(2).replace(',', ''))
-            desc = m.group(3).strip()
-            if desc and len(desc) >= 2:
-                if desc.startswith('Balance'):
-                    continue
-                if TX_CODES.search(desc):
-                    entries.append({'date': current_date, 'amount': amount,
-                                   'balance': balance, 'desc': desc})
-                elif entries:
-                    entries[-1]['desc'] += ' ' + desc
-            continue
-        if entries and len(line) > 2 and not re.match(r'^[\\d,]+\\.\\d{2}', line):
-            entries[-1]['desc'] += ' ' + line
 
-    if len(entries) < 3:
+        # Try amount+balance+desc pattern (no date, on same day)
+        m2 = tx_cont.match(line)
+        if m2 and current_date:
+            inside_transactions = True
+            amount = float(m2.group(1).replace(',', ''))
+            balance = float(m2.group(2).replace(',', ''))
+            desc = m2.group(3).strip()
+
+            # Skip summary/header lines that happen to match
+            if desc and len(desc) > 2 and not desc.startswith('Balance'):
+                # Check if this is a continuation of previous transaction's desc
+                tx_codes = ['TSFR', 'DUITNOW', 'GIRO', 'DR-ECP', 'DEP-ECP', 'CHEQ', 'CHQ',
+                           'LOAN', 'AUTOMATED', 'FPX', 'IBG', 'ATM', 'DEP-CASH', 'RMT', 'MISC']
+                is_new_tx = any(code in desc.upper() for code in tx_codes)
+
+                if is_new_tx:
+                    transactions.append({
+                        'date': current_date,
+                        'amount': amount,
+                        'balance': balance,
+                        'desc': desc,
+                        'cont_lines': []
+                    })
+                elif transactions:
+                    # Continuation line for previous transaction
+                    transactions[-1]['cont_lines'].append(desc)
+            continue
+
+        # If we are not inside transactions (e.g. footers, headers), skip all other text lines
+        if not inside_transactions:
+            continue
+
+        # Skip other known header/footer/metadata lines even if inside_transactions is True
+        if any(kw in line_upper for kw in [
+            'PENYATA AKAUN', 'TARIKH URUS', 'DATE TRANSACTION',
+            'MUKA SURAT', 'PAGE ', 'TERIMA KASIH', 'TEGASAN',
+            'RAZ UTAMA SDN BHD', 'KL CITY MAIN OFFICE', 'GRD FLOOR MENARA PUBLIC BANK',
+            '146 JLN AMPANG', '50450 KUALA LUMPUR', 'TEL: 03-21767888',
+            'DILINDUNGI OLEH PIDM', 'PROTECTED BY PIDM',
+            'NOMBOR AKAUN', 'ACCOUNT NUMBER',
+            'TARIKH PENYATA', 'STATEMENT DATE',
+            'TERIMA KASIH KERANA BERURUS NIAGA', 'THANK YOU FOR BANKING',
+            'KECEMERLANGAN ADALAH ILTIZAM KAMI', 'EXCELLENCE IS OUR COMMITMENT',
+            'KEMUSYKILAN ANDA MENGENAI', 'YOUR BANKING QUESTIONS ANSWERED',
+            'ANDA BOLEH MELIHAT NOTIS PRIVASI', 'YOU MAY VIEW PUBLIC BANK\'S PRIVACY NOTICE',
+            'PERHATIAN / ATTENTION', 'ANTI-RASUAH DAN ANTI-SOGOKAN', 'ANTI-BRIBERY AND ANTI-CORRUPTION POLICY'
+        ]):
+            continue
+
+        if transactions and len(line) > 2 and not re.match(r'^[\\d,]+\\.\\d{2}', line):
+            transactions[-1]['cont_lines'].append(line)
+
+    if len(transactions) < 3:
         raise ValueError("Could not find enough transactions")
 
     bfl = re.search(r'Balance\\s+From\\s+Last\\s+Statement\\s+([\\d,]+\\.\\d{2})',
                     full_text, re.IGNORECASE)
     if bfl:
-        entries.insert(0, {'date': entries[0]['date'], 'amount': 0,
-                          'balance': float(bfl.group(1).replace(',', '')), 
-                          'desc': 'BALANCE_FROM_LAST_STATEMENT', '_ref': True})
+        transactions.insert(0, {
+            'date': transactions[0]['date'],
+            'amount': 0.0,
+            'balance': float(bfl.group(1).replace(',', '')),
+            'desc': 'BALANCE_FROM_LAST_STATEMENT',
+            'cont_lines': [],
+            '_ref': True
+        })
 
+    # Build final records
     records = []
     prev_balance = None
-    for e in entries:
-        if e.get('_ref'):
-            prev_balance = e['balance']
+    for tx in transactions:
+        if tx.get('_ref'):
+            prev_balance = tx['balance']
             continue
+        full_desc = tx['desc']
+        for cl in tx['cont_lines']:
+            full_desc += ' ' + cl
         if prev_balance is not None:
-            delta = e['balance'] - prev_balance
+            delta = tx['balance'] - prev_balance
             if delta < -0.005:
                 dr, cr = abs(delta), 0.0
             elif delta > 0.005:
                 dr, cr = 0.0, delta
             else:
-                desc_up = e['desc'].upper()
+                desc_up = full_desc.upper()
                 if any(kw in desc_up for kw in ['CR', 'CDT', 'DEP-']):
-                    dr, cr = 0.0, e['amount']
+                    dr, cr = 0.0, tx['amount']
                 else:
-                    dr, cr = e['amount'], 0.0
+                    dr, cr = tx['amount'], 0.0
         else:
-            desc_up = e['desc'].upper()
+            desc_up = full_desc.upper()
             if any(kw in desc_up for kw in ['CR', 'CDT', 'DEP-']):
-                dr, cr = 0.0, e['amount']
+                dr, cr = 0.0, tx['amount']
             else:
-                dr, cr = e['amount'], 0.0
-        if dr + cr >= 0.005:
-            records.append({'Date': e['date'], 'Description': e['desc'][:150],
-                          'Payee': extract_payee(e['desc']),
-                          'Withdrawal (DR)': round(dr, 2),
-                          'Deposit (CR)': round(cr, 2),
-                          'Balance': e['balance']})
-        prev_balance = e['balance']
+                dr, cr = tx['amount'], 0.0
+        if dr + cr < 0.005:
+            continue
+        records.append({'Date': tx['date'], 'Description': full_desc[:150],
+                      'Payee': extract_payee(full_desc),
+                      'Withdrawal (DR)': round(dr, 2),
+                      'Deposit (CR)': round(cr, 2),
+                      'Balance': tx['balance']})
+        prev_balance = tx['balance']
 
     df = pd.DataFrame(records)
     return df

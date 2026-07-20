@@ -105,18 +105,30 @@ function preprocessPublicBankText(rawText) {
 
   const TX_CODES = /\b(TSFR|DUITNOW|GIRO|DR-ECP|DEP-ECP|CHEQ|CHQ|LOAN|AUTOMATED|FPX|IBG|ATM|DEP-CASH|RMT|MISC|KUMPULAN|PERTUBUHAN|LEMBAGA|MAXIS)\b/i;
 
-  const SKIP_LINE = /^(TEGASAN|RINGKASAN|Jumlah|Baki|This is a computer|No signature|PeeBee|Page \d|PENYATA|Nombor|Jenis|Tarikh|Muka|Dilindungi|Protected|Terima|Thank|Your banking|Anda boleh|You may|PERHATIAN|Dimaklumkan|Please be|sifar|tolerance|DATE TRANSACTION|TARIKH URUS|RAZ UTAMA|KL CITY|GRD FLOOR|BOX \d|TEL:|\. |Join the|Campaign|^\d+$)/i;
-
   const entries = [];
   let currentDate = null;
+  let insideTransactions = true;
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
-    if (!line || (SKIP_LINE.test(line) && !(entries.length > 0 && /\bRAZ\s+UTAMA\b/i.test(line)))) continue;
+    if (!line) continue;
+
+    const lineUpper = line.toUpperCase();
+
+    // State machine check: are we crossing page boundaries/headers/footers?
+    if (['BALANCE C/F', 'BAKI HANTAR HADAPAN', 'CLOSING BALANCE', 'BAKI AKHIR PENYATA', 'DAILY AND CLOSING BALANCES'].some(marker => lineUpper.includes(marker))) {
+      insideTransactions = false;
+      continue;
+    }
+    if (['BALANCE B/F', 'BAKI BAWA HADAPAN'].some(marker => lineUpper.includes(marker))) {
+      insideTransactions = true;
+      continue;
+    }
 
     // Try date + desc + amount + balance (pdf.js format: desc before amounts)
     let m = txWithDate.exec(line);
     if (m) {
+      insideTransactions = true;
       currentDate = m[1];
       let desc = (m[2] || '').trim();
       const amount = parseFloat(m[3].replace(/,/g, ''));
@@ -131,6 +143,7 @@ function preprocessPublicBankText(rawText) {
     // Try desc + amount + balance (no date)
     m = txNoDate.exec(line);
     if (m && currentDate) {
+      insideTransactions = true;
       let desc = (m[1] || '').trim();
       const amount = parseFloat(m[2].replace(/,/g, ''));
       const balance = parseFloat(m[3].replace(/,/g, ''));
@@ -149,11 +162,29 @@ function preprocessPublicBankText(rawText) {
       continue;
     }
 
+    // If we are not inside transactions (e.g. footers, headers), skip all other text lines
+    if (!insideTransactions) continue;
+
+    // Skip other known header/footer/metadata lines even if insideTransactions is true
+    if ([
+      'PENYATA AKAUN', 'TARIKH URUS', 'DATE TRANSACTION',
+      'MUKA SURAT', 'PAGE ', 'TERIMA KASIH', 'TEGASAN',
+      'RAZ UTAMA SDN BHD', 'KL CITY MAIN OFFICE', 'GRD FLOOR MENARA PUBLIC BANK',
+      '146 JLN AMPANG', '50450 KUALA LUMPUR', 'TEL: 03-21767888',
+      'DILINDUNGI OLEH PIDM', 'PROTECTED BY PIDM',
+      'NOMBOR AKAUN', 'ACCOUNT NUMBER',
+      'TARIKH PENYATA', 'STATEMENT DATE',
+      'TERIMA KASIH KERANA BERURUS NIAGA', 'THANK YOU FOR BANKING',
+      'KECEMERLANGAN ADALAH ILTIZAM KAMI', 'EXCELLENCE IS OUR COMMITMENT',
+      'KEMUSYKILAN ANDA MENGENAI', 'YOUR BANKING QUESTIONS ANSWERED',
+      'ANDA BOLEH MELIHAT NOTIS PRIVASI', 'YOU MAY VIEW PUBLIC BANK\'S PRIVACY NOTICE',
+      'PERHATIAN / ATTENTION', 'ANTI-RASUAH DAN ANTI-SOGOKAN', 'ANTI-BRIBERY AND ANTI-CORRUPTION POLICY'
+    ].some(kw => lineUpper.includes(kw))) {
+      continue;
+    }
+
     // Bare continuation line (reference numbers, etc.) — append to last entry
-    // But skip footer/boilerplate text that shouldn't be part of any transaction
     if (entries.length > 0 && line.length > 2 && !/^[\d,]+\.\d{2}/.test(line)) {
-      // Footer text patterns — don't append to descriptions
-      if (/^(Balance\s+C\/F|Closing\s+Balance|Penyata\s+ini\s+dicetak|Tandatangan\s+tidak|This\s+is\s+a\s+computer|No\s+signature|Baki\s+Harian|Daily\s+And\s+Closing|Terima\s+Kasih|Thank\s+You\s+For|Anda\s+boleh|You\s+may|PERHATIAN|Dimaklumkan|Please\s+be\s+informed)/i.test(line)) continue;
       entries[entries.length - 1].desc += ' ' + line;
     }
   }
