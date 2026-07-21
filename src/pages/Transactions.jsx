@@ -580,11 +580,11 @@ export default function Transactions() {
         />
       )}
       <div className="flex items-center justify-between mb-6">
-        <div>
+        <div className="min-w-0">
           <h1 className="text-lg font-semibold text-zinc-900">Transactions</h1>
           <p className="text-sm text-zinc-500 mt-1">Review and edit extracted transactions</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-shrink-0 mr-4">
           {selectedStmt && sorted.length > 0 && (
             <button
               onClick={handleExportCSV}
