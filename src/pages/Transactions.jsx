@@ -154,9 +154,21 @@ export default function Transactions() {
 
   const effectiveTxYear = txYear ? Number(txYear) : null;
 
-  const filteredStmts = effectiveTxYear
-    ? statements.filter(s => !s.year || s.year === effectiveTxYear)
-    : statements;
+  const filteredStmts = useMemo(() => {
+    let list = effectiveTxYear
+      ? statements.filter(s => !s.year || s.year === effectiveTxYear)
+      : statements;
+
+    return [...list].sort((a, b) => {
+      const yearA = a.year || 0;
+      const yearB = b.year || 0;
+      if (yearA !== yearB) return yearA - yearB;
+      const monthA = a.month || 0;
+      const monthB = b.month || 0;
+      if (monthA !== monthB) return monthA - monthB;
+      return (a.filename || '').localeCompare(b.filename || '');
+    });
+  }, [statements, effectiveTxYear]);
 
   const saveTimeoutRef = useRef(null);
   const transactionsRef = useRef([]);
@@ -605,6 +617,7 @@ export default function Transactions() {
               value={selectedStmt}
               onChange={setSelectedStmt}
               placeholder="Select a statement..."
+              searchable
               options={filteredStmts.map((s) => ({ value: s.id, label: s.filename }))}
             />
           </div>
