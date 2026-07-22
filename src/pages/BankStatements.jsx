@@ -457,6 +457,331 @@ if __name__ == '__main__':
       return;
     }
 
+    // Python OCR: download the script for local OCR use
+    if (extractProvider === 'pyocr') {
+      const PYTHON_OCR_SCRIPT = `import re
+import os
+import sys
+import fitz  # PyMuPDF
+import pytesseract
+import pandas as pd
+from PIL import Image
+import io
+
+# Default Windows installation path for Tesseract OCR
+pytesseract.pytesseract.tesseract_cmd = r'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'
+
+PURPOSE_KEYWORDS = [
+    "PAYMENT", "PYMT", "PETTY CASH", "PETTYCASH", "SALARY", "CLAIM", "RENTAL", 
+    "INSTALLMENT", "EXPENSES", "ALLOWANCE", "CERT", "FEE", "COURSE", "SERVICE", 
+    "DOWNPYMT", "PARKING", "CHECK SOLAR", "BIL TM", "INSOLVENSI", "ELAUN", 
+    "CLEANER", "MONTLY", "TENDER", "AUDIT", "ROADTAX", "INSURANCE", "PRINT", 
+    "COMPANY", "PROFILE", "SABAH", "TIKET", "GALA", "DINNER", "SPAN", "HSE", 
+    "LOAN", "SCORE", "PRINTER", "IMIGRESEN", "MASSIVE", "OFFICE", "CYBER", 
+    "TNB", "INDAH WATER", "IWK", "PETTY", "CASH", "BIL", "CTC", "AZ", "FOR", 
+    "ICE", "NATHAN", "TRANSFER", "FUND", "JAN", "FEB", "MAR", "APR", "MAY", 
+    "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC", "JAN24", "JANUARY", 
+    "FEBRUARY", "MARCH", "APRIL", "JUNE", "JULY", "AUGUST", "SEPTEMBER", 
+    "OCTOBER", "NOVEMBER", "DECEMBER", "DUIT RAYA", "DUITRAYA"
+]
+
+purpose_pattern = re.compile(r'\\s+\\b(' + '|'.join(PURPOSE_KEYWORDS) + r')\\b.*', re.IGNORECASE)
+
+def clean_extracted_name(name):
+    name = re.sub(r'MYCN\\d+.*', '', name, flags=re.IGNORECASE)
+    name = re.sub(r'DUITNOW\\s*\\(.*', '', name, flags=re.IGNORECASE)
+    name = re.sub(r'Balance\\s+C/F.*', '', name, flags=re.IGNORECASE)
+    name = purpose_pattern.sub('', name)
+    name = re.sub(r'\\s+\\b(?=[A-Z]*\\d)(?=\\d*[A-Z])[A-Z0-9_-]{5,}\\b.*$', '', name, flags=re.IGNORECASE)
+    name = re.sub(r'\\s+', ' ', name).strip()
+    
+    mappings = {
+        'MUHAMMAD RAIMIEY BIN': 'MUHAMMAD RAIMIEY',
+        'FARZIEYANA BINTI MOH': 'FARZIEYANA BINTI MOHD ARIFF',
+        'SITI MARDIANASARI BI': 'SITI MARDIANASARI',
+        'AILYN BINTI ABD.MAJI': 'AILYN BINTI ABD MAJID'
+    }
+    upper_name = name.upper()
+    if upper_name in mappings:
+        return mappings[upper_name]
+    return name
+
+def extract_payee(desc):
+    if not desc:
+        return ""
+    du = desc.upper()
+    known_entities = {
+        'LEMBAGA HASIL DALAM NEGERI': 'LEMBAGA HASIL DALAM NEGERI',
+        'KUMPULAN WANG SIMPANAN PEKERJA': 'KUMPULAN WANG SIMPANAN PEKERJA',
+        'PERTUBUHAN KESELAMATAN SOSIAL': 'PERTUBUHAN KESELAMATAN SOSIAL',
+        'LEMBAGA PEMBANGUNAN INDUSTRI': 'LEMBAGA PEMBANGUNAN INDUSTRI',
+    }
+    for key, val in known_entities.items():
+        if key in du:
+            return val
+            
+    if 'DR-ECP' in du:
+        m = re.search(r'DR-ECP\\s+\\d+(?:\\s+\\d+)?\\s*(.*)', du)
+        if m:
+            return clean_extracted_name(m.group(1))
+    if 'DEP-ECP' in du:
+        m = re.search(r'DEP-ECP\\s+\\d+\\s*(.*)', du)
+        if m:
+            name = m.group(1)
+            name = re.sub(r'^[A-Z0-9]{15,}\\s+', '', name)
+            name = re.sub(r'^(RHB|MBB|PBB|CIMB)\\s+', '', name, flags=re.IGNORECASE)
+            return clean_extracted_name(name)
+
+    m = re.search(r'DUITNOW\\s+TRSF\\s+(?:DR|CR)\\s+(?:\\d{6}\\s+)?(.*)', du)
+    if m:
+        return clean_extracted_name(m.group(1))
+        
+    m = re.search(r'TSFR\\s+FUND\\s+(?:DR|CR)(?:-ATM/EFT)?\\s+\\d{6}\\s+(?:\\w*X{2,}\\w*\\s+)?(.*)', du)
+    if m:
+        name = m.group(1)
+        name = re.sub(r'^(IBG|SCB|CGB|WARRANT|TRANSFER|EFT)\\s+', '', name, flags=re.IGNORECASE)
+        return clean_extracted_name(name)
+        
+    m = re.search(r'GIRO\\s+PYMT-ATM/EFT\\s+\\d*\\s*(.*)', du)
+    if m:
+        name = m.group(1)
+        if 'JOMPAY' in name:
+            return ''
+        return clean_extracted_name(name)
+
+    if 'RMT CR' in du:
+        return 'KENANGA INVESTMENT BANK BERHAD'
+    if any(x in du for x in ['RMT DR', 'RMT CHRG']):
+        return ''
+    if 'AUTOMATED LOAN' in du:
+        return ''
+    if re.search(r'\\bCH(E)?Q(UE)?\\s+PROCESS\\s+FEE\\b', du):
+        return ''
+    if re.match(r'^CHEQ\\s+\\d+', du):
+        return ''
+    if 'MISC DR' in du:
+        return ''
+    if 'DEP-CASH' in du:
+        return ''
+    if 'FPX' in du:
+        return ''
+
+    cleaned = du
+    prefixes = [
+        r'\\b(TSFR|FUND|CR|DR|DUITNOW|TRSF|GIRO|PYMT|FPX|DEP-CASH|CDT|IBG|ATM|CASH)\\b',
+        r'\\b(ATM-EFT|PROCESS|FEE|LEMBAGA|HASIL|DALAM|NEGERI)\\b',
+        r'\\d{5,}',
+        r'[^A-Z0-9\\s.\\-/&]'
+    ]
+    for pattern in prefixes:
+        cleaned = re.sub(pattern, ' ', cleaned)
+    return clean_extracted_name(cleaned)
+
+def parse_public_bank_statement(pdf_path):
+    if not os.path.exists(pytesseract.pytesseract.tesseract_cmd):
+        print(f"\\n[Error] Tesseract OCR is not found at: {pytesseract.pytesseract.tesseract_cmd}")
+        print("Please download and install Tesseract OCR from UB Mannheim:")
+        print("https://github.com/UB-Mannheim/tesseract/wiki")
+        print("After installation, make sure the path in this script matches where it was installed.\\n")
+        sys.exit(1)
+
+    print(f"Opening PDF: {pdf_path}")
+    doc = fitz.open(pdf_path)
+    
+    full_text = ""
+    for idx, page in enumerate(doc):
+        print(f"Page {idx + 1}: Rendering & running Tesseract OCR (PSM 6)...")
+        pix = page.get_pixmap(dpi=300)
+        img_data = pix.tobytes("png")
+        img = Image.open(io.BytesIO(img_data))
+        ocr_text = pytesseract.image_to_string(img, config='--psm 6')
+        print(f"Page {idx + 1}: OCR complete ({len(ocr_text.strip())} chars extracted)")
+        full_text += ocr_text + "\\n"
+            
+    lines = full_text.split('\\n')
+    
+    tx_start = re.compile(
+        r'^(\\d{2}/\\d{2})\\s+'           
+        r'(.*?)\\s+'                     
+        r'([\\d,]+\\.\\d{2})\\s+'          
+        r'([\\d,]+\\.\\d{2})\\s*$'         
+    )
+    
+    tx_cont = re.compile(
+        r'^(.*?)\\s+'                    
+        r'([\\d,]+\\.\\d{2})\\s+'          
+        r'([\\d,]+\\.\\d{2})\\s*$'         
+    )
+    
+    transactions = []
+    current_date = None
+    inside_transactions = True
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        
+        line_upper = line.upper()
+        
+        if any(marker in line_upper for marker in ['BALANCE C/F', 'BAKI HANTAR HADAPAN', 'CLOSING BALANCE', 'BAKI AKHIR PENYATA', 'DAILY AND CLOSING BALANCES']):
+            inside_transactions = False
+            continue
+            
+        if any(marker in line_upper for marker in ['BALANCE B/F', 'BAKI BAWA HADAPAN']):
+            inside_transactions = True
+            continue
+        
+        m = tx_start.match(line)
+        if m:
+            inside_transactions = True
+            current_date = m.group(1)
+            desc = m.group(2).strip()
+            amount = float(m.group(3).replace(',', ''))
+            balance = float(m.group(4).replace(',', ''))
+            if desc and len(desc) > 2:
+                transactions.append({
+                    'date': current_date,
+                    'amount': amount,
+                    'balance': balance,
+                    'desc': desc,
+                    'cont_lines': []
+                })
+            continue
+        
+        m2 = tx_cont.match(line)
+        if m2 and current_date:
+            inside_transactions = True
+            desc = m2.group(1).strip()
+            amount = float(m2.group(2).replace(',', ''))
+            balance = float(m2.group(3).replace(',', ''))
+            
+            if desc and len(desc) > 2 and not desc.startswith('Balance'):
+                tx_codes = ['TSFR', 'DUITNOW', 'GIRO', 'DR-ECP', 'DEP-ECP', 'CHEQ', 'CHQ',
+                           'LOAN', 'AUTOMATED', 'FPX', 'IBG', 'ATM', 'DEP-CASH', 'RMT', 'MISC']
+                is_new_tx = any(code in desc.upper() for code in tx_codes)
+                
+                if is_new_tx:
+                    transactions.append({
+                        'date': current_date,
+                        'amount': amount,
+                        'balance': balance,
+                        'desc': desc,
+                        'cont_lines': []
+                    })
+                elif transactions:
+                    transactions[-1]['cont_lines'].append(desc)
+            continue
+            
+        if not inside_transactions:
+            continue
+            
+        if any(kw in line_upper for kw in [
+            'PENYATA AKAUN', 'TARIKH URUS', 'DATE TRANSACTION',
+            'MUKA SURAT', 'PAGE ', 'TERIMA KASIH', 'TEGASAN',
+            'RAZ UTAMA SDN BHD', 'KL CITY MAIN OFFICE', 'GRD FLOOR MENARA PUBLIC BANK',
+            '146 JLN AMPANG', '50450 KUALA LUMPUR', 'TEL: 03-21767888',
+            'DILINDUNGI OLEH PIDM', 'PROTECTED BY PIDM',
+            'NOMBOR AKAUN', 'ACCOUNT NUMBER',
+            'TARIKH PENYATA', 'STATEMENT DATE',
+            'TERIMA KASIH KERANA BERURUS NIAGA', 'THANK YOU FOR BANKING',
+            'KECEMERLANGAN ADALAH ILTIZAM KAMI', 'EXCELLENCE IS OUR COMMITMENT',
+            'KEMUSYKILAN ANDA MENGENAI', 'YOUR BANKING QUESTIONS ANSWERED',
+            'ANDA BOLEH MELIHAT NOTIS PRIVASI', 'YOU MAY VIEW PUBLIC BANK\\\'S PRIVACY NOTICE',
+            'PERHATIAN / ATTENTION', 'ANTI-RASUAH DAN ANTI-SOGOKAN', 'ANTI-BRIBERY AND ANTI-CORRUPTION POLICY'
+        ]):
+            continue
+            
+        if transactions and len(line) > 2 and not re.match(r'^[\\d,]+\\.\\d{2}', line):
+            transactions[-1]['cont_lines'].append(line)
+    
+    records = []
+    prev_balance = None
+    
+    for tx in transactions:
+        full_desc = tx['desc']
+        for cl in tx['cont_lines']:
+            full_desc += ' ' + cl
+        
+        if prev_balance is not None:
+            delta = tx['balance'] - prev_balance
+            if delta < -0.005:
+                dr, cr = abs(delta), 0.0
+            elif delta > 0.005:
+                dr, cr = 0.0, delta
+            else:
+                desc_up = full_desc.upper()
+                if any(kw in desc_up for kw in ['CR', 'CDT', 'DEP-']):
+                    dr, cr = 0.0, tx['amount']
+                else:
+                    dr, cr = tx['amount'], 0.0
+        else:
+            desc_up = full_desc.upper()
+            if any(kw in desc_up for kw in ['CR', 'CDT', 'DEP-']):
+                dr, cr = 0.0, tx['amount']
+            else:
+                dr, cr = tx['amount'], 0.0
+        
+        if dr + cr < 0.005:
+            continue
+        
+        records.append({
+            'Date': tx['date'],
+            'Description': full_desc[:150],
+            'Payee': extract_payee(full_desc),
+            'Withdrawal (DR)': round(dr, 2),
+            'Deposit (CR)': round(cr, 2),
+            'Balance': tx['balance']
+        })
+        
+        prev_balance = tx['balance']
+    
+    df = pd.DataFrame(records)
+    return df
+
+if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        print("Usage: python parse_pdf_ocr.py <statement_pdf>")
+        sys.exit(1)
+        
+    pdf_file = sys.argv[1]
+        
+    try:
+        df_statement = parse_public_bank_statement(pdf_file)
+        csv_name = pdf_file.rsplit('.', 1)[0] + '_parsed.csv'
+        
+        if df_statement.empty:
+            print(f"\\n[Warning] Extracted 0 transactions.")
+            df_empty = pd.DataFrame(columns=['Date', 'Description', 'Payee', 'Withdrawal (DR)', 'Deposit (CR)', 'Balance'])
+            df_empty.to_csv(csv_name, index=False)
+            sys.exit(0)
+            
+        df_statement.to_csv(csv_name, index=False)
+        dr = df_statement["Withdrawal (DR)"].sum()
+        cr = df_statement["Deposit (CR)"].sum()
+        print(f"Extracted {len(df_statement)} transactions")
+        print(f"Debits: {dr:,.2f} ({len(df_statement[df_statement['Withdrawal (DR)'] > 0])})")
+        print(f"Credits: {cr:,.2f} ({len(df_statement[df_statement['Deposit (CR)'] > 0])})")
+        print(f"Saved to: {csv_name}")
+        print("Upload this CSV file to PayVault to import the transactions.")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+`;
+      const blob = new Blob([PYTHON_OCR_SCRIPT], { type: 'text/x-python' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'parse_pdf_ocr.py';
+      a.click();
+      URL.revokeObjectURL(url);
+      setStatusMsg({ 
+        type: 'success', 
+        text: 'Python OCR script downloaded! Run: python parse_pdf_ocr.py your_statement.pdf\nThen upload the generated CSV to PayVault.' 
+      });
+      return;
+    }
+
     setExtracting(stmt.id);
     setExtractStep('download');
     setStatusMsg(null);
@@ -688,6 +1013,16 @@ if __name__ == '__main__':
               }`}
             >
               Python pypdf
+            </button>
+            <button
+              onClick={() => setExtractProvider('pyocr')}
+              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                extractProvider === 'pyocr'
+                  ? 'bg-white text-zinc-900 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-700'
+              }`}
+            >
+              Python OCR
             </button>
           </div>
 
