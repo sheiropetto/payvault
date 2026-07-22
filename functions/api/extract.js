@@ -565,7 +565,7 @@ function parseCSV(text) {
   return lines;
 }
 
-function normalizeDate(rawDate) {
+function normalizeDate(rawDate, defaultYear) {
   if (!rawDate) return null;
   const cleaned = rawDate.replace(/['"]+/g, '').trim();
   if (!cleaned) return null;
@@ -587,6 +587,13 @@ function normalizeDate(rawDate) {
   if (match) {
     const year = parseInt(match[3]) < 50 ? `20${match[3]}` : `19${match[3]}`;
     return `${year}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
+  }
+
+  // Try DD/MM or DD-MM (e.g. 01/06)
+  match = cleaned.match(/^(\d{1,2})[-/](\d{1,2})$/);
+  if (match) {
+    const yr = defaultYear || new Date().getFullYear().toString();
+    return `${yr}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
   }
 
   // Try DD MMM YYYY or DD-MMM-YY (e.g., "15 Jul 2023", "15-Jul-23", "15 July 2023")
@@ -938,12 +945,15 @@ export async function onRequest(context) {
       const { headerRowIndex, mapping } = headerInfo;
       const { dateIdx, descIdx, particularsIdx, payeeIdx, categoryIdx, debitIdx, creditIdx, amountIdx } = mapping;
 
+      const yearHint = stmt.filename.match(/(?:20\d{2})/) || (stmt.year ? [String(stmt.year)] : null);
+      const defaultYear = yearHint ? yearHint[0] : new Date().getFullYear().toString();
+
       for (let i = headerRowIndex + 1; i < rows.length; i++) {
         const row = rows[i];
         if (row.length <= Math.max(dateIdx, descIdx)) continue;
 
         const rawDate = row[dateIdx];
-        const normalized = normalizeDate(rawDate);
+        const normalized = normalizeDate(rawDate, defaultYear);
         if (!normalized) continue; // skip rows without a valid date (like spacer/total rows)
 
         const description = (row[descIdx] || '').trim();
