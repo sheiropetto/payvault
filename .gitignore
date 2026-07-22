@@ -6,3 +6,5 @@ dist/
 .wrangler/
 *.pdf
 _sample_*
+Sample/
+

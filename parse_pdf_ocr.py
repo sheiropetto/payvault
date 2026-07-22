@@ -1,6 +1,14 @@
 import re
-import pypdf
+import os
+import sys
+import fitz  # PyMuPDF
+import pytesseract
 import pandas as pd
+from PIL import Image
+import io
+
+# Default Windows installation path for Tesseract OCR
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 PURPOSE_KEYWORDS = [
     "PAYMENT", "PYMT", "PETTY CASH", "PETTYCASH", "SALARY", "CLAIM", "RENTAL", 
@@ -19,21 +27,13 @@ PURPOSE_KEYWORDS = [
 purpose_pattern = re.compile(r'\s+\b(' + '|'.join(PURPOSE_KEYWORDS) + r')\b.*', re.IGNORECASE)
 
 def clean_extracted_name(name):
-    # Strip common system identifiers / references
     name = re.sub(r'MYCN\d+.*', '', name, flags=re.IGNORECASE)
     name = re.sub(r'DUITNOW\s*\(.*', '', name, flags=re.IGNORECASE)
     name = re.sub(r'Balance\s+C/F.*', '', name, flags=re.IGNORECASE)
-    
-    # Strip purpose and trailing text
     name = purpose_pattern.sub('', name)
-    
-    # Strip any alphanumeric reference codes (must contain BOTH letters and digits, and be length >= 5)
     name = re.sub(r'\s+\b(?=[A-Z]*\d)(?=\d*[A-Z])[A-Z0-9_-]{5,}\b.*$', '', name, flags=re.IGNORECASE)
-    
-    # Clean up double spaces
     name = re.sub(r'\s+', ' ', name).strip()
     
-    # Apply name mappings/corrections for truncated payees
     mappings = {
         'MUHAMMAD RAIMIEY BIN': 'MUHAMMAD RAIMIEY',
         'FARZIEYANA BINTI MOH': 'FARZIEYANA BINTI MOHD ARIFF',
@@ -43,27 +43,22 @@ def clean_extracted_name(name):
     upper_name = name.upper()
     if upper_name in mappings:
         return mappings[upper_name]
-        
     return name
 
 def extract_payee(desc):
     if not desc:
         return ""
-    
     du = desc.upper()
-    
     known_entities = {
         'LEMBAGA HASIL DALAM NEGERI': 'LEMBAGA HASIL DALAM NEGERI',
         'KUMPULAN WANG SIMPANAN PEKERJA': 'KUMPULAN WANG SIMPANAN PEKERJA',
         'PERTUBUHAN KESELAMATAN SOSIAL': 'PERTUBUHAN KESELAMATAN SOSIAL',
         'LEMBAGA PEMBANGUNAN INDUSTRI': 'LEMBAGA PEMBANGUNAN INDUSTRI',
     }
-    
     for key, val in known_entities.items():
         if key in du:
             return val
             
-    # DR-ECP / DEP-ECP
     if 'DR-ECP' in du:
         m = re.search(r'DR-ECP\s+\d+(?:\s+\d+)?\s*(.*)', du)
         if m:
@@ -76,19 +71,16 @@ def extract_payee(desc):
             name = re.sub(r'^(RHB|MBB|PBB|CIMB)\s+', '', name, flags=re.IGNORECASE)
             return clean_extracted_name(name)
 
-    # DUITNOW TRSF DR/CR
     m = re.search(r'DUITNOW\s+TRSF\s+(?:DR|CR)\s+(?:\d{6}\s+)?(.*)', du)
     if m:
         return clean_extracted_name(m.group(1))
         
-    # TSFR FUND DR/CR-ATM/EFT
     m = re.search(r'TSFR\s+FUND\s+(?:DR|CR)(?:-ATM/EFT)?\s+\d{6}\s+(?:\w*X{2,}\w*\s+)?(.*)', du)
     if m:
         name = m.group(1)
         name = re.sub(r'^(IBG|SCB|CGB|WARRANT|TRANSFER|EFT)\s+', '', name, flags=re.IGNORECASE)
         return clean_extracted_name(name)
         
-    # GIRO PYMT-ATM/EFT
     m = re.search(r'GIRO\s+PYMT-ATM/EFT\s+\d*\s*(.*)', du)
     if m:
         name = m.group(1)
@@ -96,7 +88,6 @@ def extract_payee(desc):
             return ''
         return clean_extracted_name(name)
 
-    # RMT CR → KENANGA INVESTMENT BANK
     if 'RMT CR' in du:
         return 'KENANGA INVESTMENT BANK BERHAD'
     if any(x in du for x in ['RMT DR', 'RMT CHRG']):
@@ -114,7 +105,6 @@ def extract_payee(desc):
     if 'FPX' in du:
         return ''
 
-    # Fallback to clean fallback name
     cleaned = du
     prefixes = [
         r'\b(TSFR|FUND|CR|DR|DUITNOW|TRSF|GIRO|PYMT|FPX|DEP-CASH|CDT|IBG|ATM|CASH)\b',
@@ -127,28 +117,45 @@ def extract_payee(desc):
     return clean_extracted_name(cleaned)
 
 def parse_public_bank_statement(pdf_path):
-    reader = pypdf.PdfReader(pdf_path)
+    # Verify Tesseract is installed
+    if not os.path.exists(pytesseract.pytesseract.tesseract_cmd):
+        print(f"\n[Error] Tesseract OCR is not found at: {pytesseract.pytesseract.tesseract_cmd}")
+        print("Please download and install Tesseract OCR from UB Mannheim:")
+        print("https://github.com/UB-Mannheim/tesseract/wiki")
+        print("After installation, make sure the path in this script matches where it was installed.\n")
+        sys.exit(1)
+
+    print(f"Opening PDF: {pdf_path}")
+    doc = fitz.open(pdf_path)
     
-    # Combine all pages into one text stream
     full_text = ""
-    for page in reader.pages:
-        full_text += page.extract_text() + "\n"
-    
+    for idx, page in enumerate(doc):
+        print(f"Page {idx + 1}: Rendering & running Tesseract OCR (PSM 6)...")
+        # Render page to high-res image (300 DPI) for accurate OCR
+        pix = page.get_pixmap(dpi=300)
+        img_data = pix.tobytes("png")
+        img = Image.open(io.BytesIO(img_data))
+        
+        # Run OCR on the image with PSM 6
+        ocr_text = pytesseract.image_to_string(img, config='--psm 6')
+        print(f"Page {idx + 1}: OCR complete ({len(ocr_text.strip())} chars extracted)")
+        full_text += ocr_text + "\n"
+            
     lines = full_text.split('\n')
     
-    # Pattern: [DD/MM] AMOUNT BALANCE [DESCRIPTION]
+    # OCR and visual layout format: [DD/MM] [DESCRIPTION...] [AMOUNT] [BALANCE]
     tx_start = re.compile(
         r'^(\d{2}/\d{2})\s+'           # Group 1: date DD/MM
-        r'([\d,]+\.\d{2})\s+'          # Group 2: amount
-        r'([\d,]+\.\d{2})'             # Group 3: balance (no space before desc!)
-        r'(.*)$'                        # Group 4: description (rest of line)
+        r'(.*?)\s+'                     # Group 2: description
+        r'([\d,]+\.\d{2})\s+'          # Group 3: amount
+        r'([\d,]+\.\d{2})\s*$'         # Group 4: balance
     )
     
-    # Also match lines without date (continuation or date-less)
+    # Also handle the continuation lines with amount + balance at the end
     tx_cont = re.compile(
-        r'^([\d,]+\.\d{2})\s+'          # Group 1: amount
-        r'([\d,]+\.\d{2})'             # Group 2: balance
-        r'(.*)$'                        # Group 3: description
+        r'^(.*?)\s+'                    # Group 1: description
+        r'([\d,]+\.\d{2})\s+'          # Group 2: amount
+        r'([\d,]+\.\d{2})\s*$'         # Group 3: balance
     )
     
     transactions = []
@@ -162,7 +169,6 @@ def parse_public_bank_statement(pdf_path):
         
         line_upper = line.upper()
         
-        # State machine check: are we crossing page boundaries/headers/footers?
         if any(marker in line_upper for marker in ['BALANCE C/F', 'BAKI HANTAR HADAPAN', 'CLOSING BALANCE', 'BAKI AKHIR PENYATA', 'DAILY AND CLOSING BALANCES']):
             inside_transactions = False
             continue
@@ -171,14 +177,13 @@ def parse_public_bank_statement(pdf_path):
             inside_transactions = True
             continue
         
-        # Try date+amount+balance+desc pattern
         m = tx_start.match(line)
         if m:
             inside_transactions = True
             current_date = m.group(1)
-            amount = float(m.group(2).replace(',', ''))
-            balance = float(m.group(3).replace(',', ''))
-            desc = m.group(4).strip()
+            desc = m.group(2).strip()
+            amount = float(m.group(3).replace(',', ''))
+            balance = float(m.group(4).replace(',', ''))
             if desc and len(desc) > 2:
                 transactions.append({
                     'date': current_date,
@@ -189,17 +194,14 @@ def parse_public_bank_statement(pdf_path):
                 })
             continue
         
-        # Try amount+balance+desc pattern (no date, on same day)
         m2 = tx_cont.match(line)
         if m2 and current_date:
             inside_transactions = True
-            amount = float(m2.group(1).replace(',', ''))
-            balance = float(m2.group(2).replace(',', ''))
-            desc = m2.group(3).strip()
+            desc = m2.group(1).strip()
+            amount = float(m2.group(2).replace(',', ''))
+            balance = float(m2.group(3).replace(',', ''))
             
-            # Skip summary/header lines that happen to match
             if desc and len(desc) > 2 and not desc.startswith('Balance'):
-                # Check if this is a continuation of previous transaction's desc
                 tx_codes = ['TSFR', 'DUITNOW', 'GIRO', 'DR-ECP', 'DEP-ECP', 'CHEQ', 'CHQ',
                            'LOAN', 'AUTOMATED', 'FPX', 'IBG', 'ATM', 'DEP-CASH', 'RMT', 'MISC']
                 is_new_tx = any(code in desc.upper() for code in tx_codes)
@@ -213,15 +215,12 @@ def parse_public_bank_statement(pdf_path):
                         'cont_lines': []
                     })
                 elif transactions:
-                    # Continuation line for previous transaction
                     transactions[-1]['cont_lines'].append(desc)
             continue
             
-        # If we are not inside transactions (e.g. footers, headers), skip all other text lines
         if not inside_transactions:
             continue
             
-        # Skip other known header/footer/metadata lines even if inside_transactions is True
         if any(kw in line_upper for kw in [
             'PENYATA AKAUN', 'TARIKH URUS', 'DATE TRANSACTION',
             'MUKA SURAT', 'PAGE ', 'TERIMA KASIH', 'TEGASAN',
@@ -241,7 +240,6 @@ def parse_public_bank_statement(pdf_path):
         if transactions and len(line) > 2 and not re.match(r'^[\d,]+\.\d{2}', line):
             transactions[-1]['cont_lines'].append(line)
     
-    # Build final records
     records = []
     prev_balance = None
     
@@ -250,7 +248,6 @@ def parse_public_bank_statement(pdf_path):
         for cl in tx['cont_lines']:
             full_desc += ' ' + cl
         
-        # Determine debit/credit using balance chain
         if prev_balance is not None:
             delta = tx['balance'] - prev_balance
             if delta < -0.005:
@@ -287,13 +284,12 @@ def parse_public_bank_statement(pdf_path):
     df = pd.DataFrame(records)
     return df
 
-
 if __name__ == '__main__':
-    import sys
     if len(sys.argv) < 2:
-        pdf_file = "Sample/2024/3226704211_2024-October.pdf"
-    else:
-        pdf_file = sys.argv[1]
+        print("Usage: python parse_pdf_ocr.py <statement_pdf>")
+        sys.exit(1)
+        
+    pdf_file = sys.argv[1]
         
     try:
         df_statement = parse_public_bank_statement(pdf_file)
@@ -301,16 +297,14 @@ if __name__ == '__main__':
         
         if df_statement.empty:
             print(f"\n[Warning] Extracted 0 transactions.")
-            print("This PDF appears to be scanned or contains no selectable digital text.")
-            print("Please make sure you are using a digital (not scanned) statement PDF.")
-            # Create a CSV with empty columns to match the schema
+            # Create template
             df_empty = pd.DataFrame(columns=['Date', 'Description', 'Payee', 'Withdrawal (DR)', 'Deposit (CR)', 'Balance'])
             df_empty.to_csv(csv_name, index=False)
             print(f"Saved empty template CSV to {csv_name}")
             sys.exit(0)
             
         df_statement.to_csv(csv_name, index=False)
-        print(f"Successfully extracted {len(df_statement)} transactions and saved to {csv_name}.")
+        print(f"\nSuccessfully extracted {len(df_statement)} transactions and saved to {csv_name}.")
         print(df_statement.head(30).to_string())
         print(f"\n--- Totals ---")
         dr = df_statement["Withdrawal (DR)"].sum()
