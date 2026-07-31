@@ -110,6 +110,7 @@ export const api = {
 
   // Payees
   getPayees: (companyId, year) => request(`/payees?company_id=${companyId}${year ? `&year=${year}` : ''}`),
+  getPayeeMonthly: (companyId, year) => request(`/payees/monthly?company_id=${companyId}&year=${year}`),
   renamePayee: (oldPayee, newPayee) => request('/payees', {
     method: 'PATCH', body: JSON.stringify({ oldPayee, newPayee }),
   }),

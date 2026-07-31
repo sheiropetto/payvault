@@ -88,7 +88,7 @@ export default function Payees() {
     return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  function handleExportCSV() {
+  async function handleExportCSV() {
     const rows = filtered.length ? filtered : payees;
     if (!rows.length) return;
     const headers = ['Payee', 'Transactions', 'Months', 'Debit (RM)', 'Credit (RM)', 'Net (RM)'];
@@ -105,6 +105,26 @@ export default function Payees() {
         (debit - credit).toFixed(2),
       ].join(','));
     }
+
+    // Monthly breakdown (long format) when a single year is selected
+    if (year) {
+      const monthly = await api.getPayeeMonthly(selectedCompanyId, year).catch(() => []);
+      if (monthly.length) {
+        csvRows.push('');
+        csvRows.push(`MONTHLY BREAKDOWN - ${year}`);
+        csvRows.push(['Payee', 'Month', 'Debit (RM)', 'Credit (RM)'].join(','));
+        const sortedMonthly = [...monthly].sort((a, b) => a.payee.localeCompare(b.payee) || (a.month - b.month));
+        for (const m of sortedMonthly) {
+          csvRows.push([
+            `"${(m.payee || '').replace(/"/g, '""')}"`,
+            `${year}-${String(m.month).padStart(2, '0')}`,
+            (Number(m.total_debit) || 0).toFixed(2),
+            (Number(m.total_credit) || 0).toFixed(2),
+          ].join(','));
+        }
+      }
+    }
+
     const blob = new Blob(['\uFEFF' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -114,26 +134,62 @@ export default function Payees() {
     URL.revokeObjectURL(url);
   }
 
-  function handlePrintReport() {
+  async function handlePrintReport() {
     const rows = filtered.length ? filtered : payees;
     if (!rows.length) return;
     const companyName = selectedCompany?.name || 'Company';
     const yearLabel = year ? String(year) : 'All Years';
-    const totalDebit = rows.reduce((s, p) => s + (Number(p.total_debit) || 0), 0);
-    const totalCredit = rows.reduce((s, p) => s + (Number(p.total_credit) || 0), 0);
+    const sorted = [...rows].sort((a, b) => (Number(b.total_debit) || 0) - (Number(a.total_debit) || 0));
+    const totalDebit = sorted.reduce((s, p) => s + (Number(p.total_debit) || 0), 0);
 
-    const rowHtml = rows.map(p => {
-      const debit = Number(p.total_debit) || 0;
-      const credit = Number(p.total_credit) || 0;
-      return `<tr>
+    // Yearly summary list (payments out per payee)
+    const summaryRows = sorted.map(p => `
+      <tr>
         <td>${esc(p.payee)}</td>
-        <td class="num">${p.tx_count || 0}</td>
-        <td class="num">${p.stmt_count || 0}</td>
-        <td class="num">${formatCurrency(debit)}</td>
-        <td class="num">${formatCurrency(credit)}</td>
-        <td class="num">${formatCurrency(debit - credit)}</td>
-      </tr>`;
-    }).join('');
+        <td class="num">${formatCurrency(p.total_debit)}</td>
+      </tr>
+    `).join('');
+
+    // Monthly breakdown (only meaningful for a single year)
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    let monthly = [];
+    if (year) {
+      monthly = await api.getPayeeMonthly(selectedCompanyId, year).catch(() => []);
+    }
+
+    function matrixHtml(type) {
+      const byPayee = {};
+      for (const m of monthly) {
+        if (!byPayee[m.payee]) byPayee[m.payee] = Array(12).fill(0);
+        const val = Number(type === 'debit' ? m.total_debit : m.total_credit) || 0;
+        byPayee[m.payee][m.month - 1] += val;
+      }
+      const names = Object.keys(byPayee)
+        .filter(name => byPayee[name].some(v => v > 0))
+        .sort((a, b) => {
+          const sumA = byPayee[a].reduce((s, v) => s + v, 0);
+          const sumB = byPayee[b].reduce((s, v) => s + v, 0);
+          return sumB - sumA;
+        });
+      if (!names.length) return `<p class="muted">No ${type} transactions for ${esc(yearLabel)}.</p>`;
+      const colTotals = Array(12).fill(0);
+      const bodyRows = names.map(name => {
+        const cells = byPayee[name].map((v, i) => {
+          colTotals[i] += v;
+          return `<td class="num">${v ? formatCurrency(v) : ''}</td>`;
+        }).join('');
+        const rowTotal = byPayee[name].reduce((s, v) => s + v, 0);
+        return `<tr><td>${esc(name)}</td>${cells}<td class="num strong">${formatCurrency(rowTotal)}</td></tr>`;
+      }).join('');
+      const totalCells = colTotals.map(v => `<td class="num">${v ? formatCurrency(v) : ''}</td>`).join('');
+      return `<table class="report-table matrix">
+        <thead><tr><th>Payee</th>${monthNames.map(mn => `<th class="num">${mn}</th>`).join('')}<th class="num">Total</th></tr></thead>
+        <tbody>
+          ${bodyRows}
+          <tr class="total"><td>All payees</td>${totalCells}<td class="num strong">${formatCurrency(colTotals.reduce((s, v) => s + v, 0))}</td></tr>
+        </tbody>
+      </table>`;
+    }
 
     const html = `
       <style>
@@ -141,31 +197,47 @@ export default function Payees() {
         .report-head { text-align: center; margin-bottom: 20px; }
         .report-head h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
         .report-head p { font-size: 12px; color: #52525b; margin: 2px 0; }
-        .report-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-        .report-table th { text-align: left; text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em; color: #52525b; padding: 8px 10px; border-bottom: 1px solid #d4d4d8; }
-        .report-table td { padding: 8px 10px; border-bottom: 1px solid #e4e4e7; }
-        .report-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+        .report-section { margin-top: 26px; }
+        .report-section h2 { font-size: 13px; font-weight: 600; color: #18181b; margin: 0 0 8px; }
+        .report-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        .report-table.matrix { font-size: 10px; }
+        .report-table th { text-align: left; text-transform: uppercase; font-size: 9px; letter-spacing: 0.05em; color: #52525b; padding: 6px 8px; border-bottom: 1px solid #d4d4d8; }
+        .report-table td { padding: 6px 8px; border-bottom: 1px solid #e4e4e7; }
+        .report-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .report-table .strong { font-weight: 600; }
         .report-table tr.total td { font-weight: 600; border-top: 2px solid #d4d4d8; border-bottom: none; }
+        .muted { color: #71717a; font-size: 11px; }
+        @media print {
+          @page { size: A4 landscape; margin: 10mm; }
+          .report-section { page-break-inside: avoid; }
+        }
       </style>
       <div class="report-wrap">
         <div class="report-head">
           <h1>Payee Report — ${esc(companyName)}</h1>
           <p>Year: ${esc(yearLabel)} &nbsp;·&nbsp; Generated: ${esc(new Date().toLocaleString('en-MY'))}</p>
         </div>
-        <table class="report-table">
-          <thead>
-            <tr><th>Payee</th><th class="num">Transactions</th><th class="num">Months</th><th class="num">Debit (RM)</th><th class="num">Credit (RM)</th><th class="num">Net (RM)</th></tr>
-          </thead>
-          <tbody>
-            ${rowHtml}
-            <tr class="total">
-              <td>Total (${rows.length} payee${rows.length > 1 ? 's' : ''})</td><td class="num"></td><td class="num"></td>
-              <td class="num">${formatCurrency(totalDebit)}</td>
-              <td class="num">${formatCurrency(totalCredit)}</td>
-              <td class="num">${formatCurrency(totalDebit - totalCredit)}</td>
-            </tr>
-          </tbody>
-        </table>
+
+        <div class="report-section">
+          <h2>Yearly Summary — Total Payments Out</h2>
+          <table class="report-table">
+            <thead><tr><th>Payee</th><th class="num">Total (RM)</th></tr></thead>
+            <tbody>
+              ${summaryRows}
+              <tr class="total"><td>Total (${sorted.length} payee${sorted.length > 1 ? 's' : ''})</td><td class="num">${formatCurrency(totalDebit)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        ${year ? `
+        <div class="report-section">
+          <h2>Debit by Month — ${esc(year)}</h2>
+          ${matrixHtml('debit')}
+        </div>
+        <div class="report-section">
+          <h2>Credit by Month — ${esc(year)}</h2>
+          ${matrixHtml('credit')}
+        </div>` : ''}
       </div>`;
 
     // Print overlay (modeled on the voucher print preview)
@@ -603,6 +675,34 @@ export default function Payees() {
                 Print Report
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Yearly summary — total payments out per payee for the selected year */}
+      {filtered.length > 0 && (
+        <div className="card mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-zinc-700">
+              Yearly Summary{year ? ` — ${year}` : ''}
+            </h2>
+            <span className="text-xs text-zinc-400">Payments out · {filtered.length} payee{filtered.length > 1 ? 's' : ''}</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-1.5">
+            {[...filtered]
+              .sort((a, b) => (Number(b.total_debit) || 0) - (Number(a.total_debit) || 0))
+              .map(p => (
+                <div key={p.payee} className="flex items-baseline justify-between gap-3 text-sm min-w-0">
+                  <span className="text-zinc-700 truncate">{p.payee}</span>
+                  <span className="text-zinc-900 font-medium tabular-nums whitespace-nowrap">{formatCurrency(p.total_debit)}</span>
+                </div>
+              ))}
+          </div>
+          <div className="mt-3 pt-3 border-t border-zinc-200 flex items-baseline justify-between text-sm">
+            <span className="font-medium text-zinc-900">Total</span>
+            <span className="font-semibold text-zinc-900 tabular-nums">
+              {formatCurrency(filtered.reduce((s, p) => s + (Number(p.total_debit) || 0), 0))}
+            </span>
           </div>
         </div>
       )}
