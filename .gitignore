@@ -8,3 +8,10 @@ dist/
 _sample_*
 Sample/
 
+# Python
+__pycache__/
+*.py[cod]
+
+# Local tooling / generated artifacts (OCR & import pipeline)
+scratch/
+
