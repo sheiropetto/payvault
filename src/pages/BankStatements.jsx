@@ -836,6 +836,24 @@ if __name__ == '__main__':
     }
   }
 
+  function handleReExtract(stmt) {
+    const providerLabel = extractProvider === 'deepseek' ? 'DeepSeek'
+      : extractProvider === 'gemini' ? 'Gemini'
+      : extractProvider === 'pypdf' ? 'Python pypdf'
+      : extractProvider === 'pyocr' ? 'Python OCR'
+      : 'Auto';
+    setConfirm({
+      title: 'Re-extract Statement',
+      message: `Re-extract "${stmt.filename}" with ${providerLabel}?\n\nThis will delete all its existing transactions and unlink any vouchers created from them (the vouchers themselves will NOT be deleted), then re-run extraction. This is useful for picking up credit/deposit transactions that were added in a recent update.`,
+      variant: 'default',
+      confirmLabel: 'Re-extract',
+      onConfirm: () => {
+        setConfirm(null);
+        handleExtract(stmt);
+      },
+    });
+  }
+
   async function handleDelete(id) {
     try {
       await api.deleteStatement(id);
@@ -1289,6 +1307,16 @@ if __name__ == '__main__':
                           >
                             <Download className="w-3.5 h-3.5" strokeWidth={1.5} />
                           </button>
+                          {stmt.status === 'done' && (
+                            <button
+                              className="btn-ghost text-xs px-2 py-1"
+                              title="Re-extract statement"
+                              onClick={() => handleReExtract(stmt)}
+                              disabled={extracting === stmt.id}
+                            >
+                              <RefreshCw className="w-3.5 h-3.5" strokeWidth={1.5} />
+                            </button>
+                          )}
                           {stmt.status === 'done' && (
                             <button
                               className="btn-ghost text-xs px-2 py-1"
