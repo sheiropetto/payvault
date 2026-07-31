@@ -797,7 +797,7 @@ export default function Payees() {
       {/* Payees list */}
       {payees.length === 0 ? (
         <EmptyState
-          icon={<Users className="w-8 h-8" strokeWidth={1.5} />}
+          icon={Users}
           title={year ? `No payees in ${year}` : 'No payees yet'}
           description={year
             ? 'No transactions with a payee were found for this year. Try another year or "All years".'
