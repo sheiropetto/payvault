@@ -12,6 +12,8 @@ import Companies from './pages/Companies';
 import Templates from './pages/Templates';
 import Settings from './pages/Settings';
 import Payees from './pages/Payees';
+import MoneyIn from './pages/MoneyIn';
+import MoneyOut from './pages/MoneyOut';
 
 function ProtectedRoute({ children }) {
   const { isLoaded, isSignedIn } = useUser();
@@ -61,6 +63,8 @@ export default function App() {
         <Route path="templates" element={<Templates />} />
         <Route path="settings" element={<Settings />} />
         <Route path="payees" element={<Payees />} />
+        <Route path="money-in" element={<MoneyIn />} />
+        <Route path="money-out" element={<MoneyOut />} />
       </Route>
     </Routes>
   );

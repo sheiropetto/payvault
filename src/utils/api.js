@@ -114,6 +114,9 @@ export const api = {
   renamePayee: (oldPayee, newPayee) => request('/payees', {
     method: 'PATCH', body: JSON.stringify({ oldPayee, newPayee }),
   }),
+
+  // Cash flow (Money In / Money Out)
+  getCashflow: (companyId, year) => request(`/cashflow?company_id=${companyId}${year ? `&year=${year}` : ''}`),
   mergePayees: (from, to) => request('/payees', {
     method: 'POST', body: JSON.stringify({ from, to }),
   }),

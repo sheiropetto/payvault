@@ -1,0 +1,441 @@
+import { useState, useEffect, useMemo, useRef } from 'react';
+import {
+  TrendingUp, TrendingDown, Download, Printer, Search, Wallet, Receipt, CalendarRange, Crown
+} from 'lucide-react';
+import { api } from '../../utils/api';
+import { formatCurrency } from '../../utils/format';
+import { useCompany } from '../../contexts/CompanyContext';
+import LoadingSpinner from '../ui/LoadingSpinner';
+import EmptyState from '../ui/EmptyState';
+import Select from '../ui/Select';
+
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function formatCompact(n) {
+  const num = Number(n) || 0;
+  if (Math.abs(num) >= 1_000_000) return `${(num / 1_000_000).toFixed(num >= 10_000_000 ? 0 : 1)}M`;
+  if (Math.abs(num) >= 1_000) return `${(num / 1_000).toFixed(num >= 100_000 ? 0 : 1)}K`;
+  return `${Math.round(num)}`;
+}
+
+// Shared page for the "Money In" (credits) and "Money Out" (debits) views.
+// direction = 'in' | 'out'
+export default function CashFlow({ direction }) {
+  const isIn = direction === 'in';
+  const { selectedCompanyId, selectedCompany } = useCompany();
+
+  const [statements, setStatements] = useState([]);
+  const [year, setYear] = useState('');
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [sortField, setSortField] = useState('date');
+  const [sortDir, setSortDir] = useState('desc');
+
+  const yearTouched = useRef(false);
+  const yearRef = useRef('');
+
+  const allYears = useMemo(() => {
+    return [...new Set(statements.map(s => s.year).filter(Boolean))].sort((a, b) => b - a);
+  }, [statements]);
+
+  useEffect(() => { yearRef.current = year; }, [year]);
+
+  useEffect(() => {
+    if (selectedCompanyId) {
+      yearTouched.current = false;
+      setYear('');
+      setStatements([]);
+      api.getStatements(selectedCompanyId)
+        .then(d => setStatements(d || []))
+        .catch(() => setStatements([]));
+    }
+  }, [selectedCompanyId]);
+
+  // Auto-default to the latest available year (one-time per company)
+  useEffect(() => {
+    if (allYears.length > 0 && !yearTouched.current && !year) {
+      setYear(String(allYears[0]));
+    }
+  }, [allYears, year]);
+
+  useEffect(() => {
+    if (!selectedCompanyId) return;
+    let cancelled = false;
+    setLoading(true);
+    const reqYear = yearRef.current;
+    api.getCashflow(selectedCompanyId, reqYear)
+      .then(d => { if (!cancelled && reqYear === yearRef.current) setData(d); })
+      .catch(err => console.error(err))
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedCompanyId, year]);
+
+  // ── KPIs ──
+  const summary = data?.summary || {};
+  const total = isIn ? (Number(summary.total_credit) || 0) : (Number(summary.total_debit) || 0);
+  const count = isIn ? (summary.cr_count || 0) : (summary.dr_count || 0);
+  const monthlyAvg = year
+    ? total / 12
+    : (data?.by_year?.length ? total / data.by_year.length : 0);
+
+  const topCounterparty = useMemo(() => {
+    const payees = data?.by_payee || [];
+    let best = null;
+    for (const p of payees) {
+      const val = isIn ? (Number(p.credit) || 0) : (Number(p.debit) || 0);
+      if (val > 0 && (!best || val > best.value)) best = { name: p.payee, value: val };
+    }
+    return best;
+  }, [data, isIn]);
+
+  const kpis = [
+    {
+      label: isIn ? 'Total Money In' : 'Total Money Out',
+      value: formatCurrency(total),
+      icon: isIn ? TrendingUp : TrendingDown,
+      color: isIn ? 'text-emerald-600' : 'text-violet-600',
+      bg: isIn ? 'bg-emerald-100' : 'bg-violet-100',
+    },
+    {
+      label: isIn ? 'Credits' : 'Payments',
+      value: count.toLocaleString(),
+      icon: Receipt,
+      color: 'text-zinc-900',
+      bg: 'bg-zinc-100',
+    },
+    {
+      label: year ? 'Monthly Average' : 'Yearly Average',
+      value: formatCurrency(monthlyAvg),
+      icon: CalendarRange,
+      color: 'text-blue-600',
+      bg: 'bg-blue-100',
+    },
+    {
+      label: isIn ? 'Top Source' : 'Top Payee',
+      value: topCounterparty?.name ? topCounterparty.name : '—',
+      sub: topCounterparty ? formatCurrency(topCounterparty.value) : null,
+      icon: Crown,
+      color: 'text-amber-600',
+      bg: 'bg-amber-100',
+    },
+  ];
+
+  // ── Monthly / yearly bars ──
+  const bars = useMemo(() => {
+    if (year) {
+      const map = {};
+      for (const m of (data?.by_month || [])) map[m.month] = Number(isIn ? m.credit : m.debit) || 0;
+      return MONTH_NAMES.map((label, i) => ({ label, value: map[i + 1] || 0 }));
+    }
+    return (data?.by_year || []).map(y => ({ label: String(y.year), value: Number(isIn ? y.credit : y.debit) || 0 }));
+  }, [data, year, isIn]);
+
+  const maxBar = Math.max(1, ...bars.map(b => b.value));
+
+  // ── Category breakdown ──
+  const categories = useMemo(() => {
+    const cats = (data?.by_category || [])
+      .map(c => ({
+        name: c.category || 'Other',
+        value: Number(isIn ? c.credit : c.debit) || 0,
+        count: c.tx_count || 0,
+      }))
+      .filter(c => c.value > 0)
+      .sort((a, b) => b.value - a.value);
+    return cats;
+  }, [data, isIn]);
+  const maxCat = Math.max(1, ...categories.map(c => c.value));
+
+  // ── Top payees (by direction) ──
+  const topPayees = useMemo(() => {
+    return (data?.by_payee || [])
+      .map(p => ({ name: p.payee, value: Number(isIn ? p.credit : p.debit) || 0 }))
+      .filter(p => p.value > 0)
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 10);
+  }, [data, isIn]);
+  const maxPayee = Math.max(1, ...topPayees.map(p => p.value));
+
+  // ── Drill-down table ──
+  const rows = useMemo(() => {
+    return (data?.transactions || []).filter(tx => isIn ? (tx.credit_amount > 0) : (tx.debit_amount > 0));
+  }, [data, isIn]);
+
+  const filteredRows = useMemo(() => {
+    let r = rows;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      r = r.filter(tx =>
+        (tx.description || '').toLowerCase().includes(q) ||
+        (tx.payee || '').toLowerCase().includes(q) ||
+        (tx.category || '').toLowerCase().includes(q)
+      );
+    }
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...r].sort((a, b) => {
+      if (sortField === 'amount') {
+        const amtA = Number(isIn ? a.credit_amount : a.debit_amount) || 0;
+        const amtB = Number(isIn ? b.credit_amount : b.debit_amount) || 0;
+        return (amtA - amtB) * dir;
+      }
+      if (sortField === 'payee') return ((a.payee || '').localeCompare(b.payee || '')) * dir;
+      if (sortField === 'category') return ((a.category || '').localeCompare(b.category || '')) * dir;
+      return ((a.date || '') < (b.date || '') ? -1 : (a.date || '') > (b.date || '') ? 1 : 0) * dir;
+    });
+  }, [rows, search, sortField, sortDir, isIn]);
+
+  function toggleSort(field) {
+    if (sortField === field) {
+      setSortDir(prev => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDir(field === 'payee' || field === 'category' ? 'asc' : 'desc');
+    }
+  }
+
+  // ── Export CSV ──
+  function handleExportCSV() {
+    if (!filteredRows.length) return;
+    const headers = ['Date', 'Description', 'Particulars', 'Payee', 'Category', 'Debit (RM)', 'Credit (RM)', 'Statement'];
+    const lines = [headers.join(',')];
+    lines.push(`TOTAL ${isIn ? 'MONEY IN' : 'MONEY OUT'},${filteredRows.length} rows,,${formatCurrency(total)},,,,`);
+    for (const tx of filteredRows) {
+      lines.push([
+        tx.date || '',
+        `"${(tx.description || '').replace(/"/g, '""')}"`,
+        `"${(tx.particulars || '').replace(/"/g, '""')}"`,
+        `"${(tx.payee || '').replace(/"/g, '""')}"`,
+        `"${(tx.category || '').replace(/"/g, '""')}"`,
+        (Number(tx.debit_amount) || 0).toFixed(2),
+        (Number(tx.credit_amount) || 0).toFixed(2),
+        `"${(tx.statement || '').replace(/"/g, '""')}"`,
+      ].join(','));
+    }
+    const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `money-${isIn ? 'in' : 'out'}${year ? `-${year}` : '-all'}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  if (loading) return <LoadingSpinner />;
+
+  const title = isIn ? 'Money In' : 'Money Out';
+  const subtitle = isIn
+    ? 'Cash coming into the account (credits / deposits)'
+    : 'Cash going out of the account (debits / payments)';
+
+  return (
+    <div className="p-6 lg:p-8 max-w-7xl mx-auto">
+      {/* Header */}
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-6 no-print">
+        <div>
+          <h1 className="text-xl font-semibold text-zinc-900 flex items-center gap-2">
+            {isIn ? <TrendingUp className="w-5 h-5 text-emerald-600" strokeWidth={1.5} /> : <TrendingDown className="w-5 h-5 text-violet-600" strokeWidth={1.5} />}
+            {title}
+          </h1>
+          <p className="text-sm text-zinc-500 mt-0.5">{subtitle}</p>
+        </div>
+        <div className="flex items-end gap-3">
+          <div className="w-36">
+            <label className="label">Year</label>
+            <Select
+              value={year}
+              onChange={(v) => { yearTouched.current = true; setYear(v); }}
+              options={[
+                { value: '', label: 'All years' },
+                ...allYears.map(y => ({ value: String(y), label: String(y) })),
+              ]}
+            />
+          </div>
+          <div>
+            <label className="label">&nbsp;</label>
+            <div className="flex gap-2">
+              <button
+                className="btn-ghost text-xs flex items-center gap-1.5 h-9 px-3 rounded-lg border border-zinc-300 bg-transparent text-zinc-700 hover:bg-zinc-50"
+                onClick={handleExportCSV}
+                disabled={!filteredRows.length}
+              >
+                <Download className="w-3.5 h-3.5" strokeWidth={1.5} />
+                Export CSV
+              </button>
+              <button
+                className="btn-ghost text-xs flex items-center gap-1.5 h-9 px-3 rounded-lg border border-zinc-300 bg-transparent text-zinc-700 hover:bg-zinc-50"
+                onClick={() => window.print()}
+                disabled={!filteredRows.length}
+              >
+                <Printer className="w-3.5 h-3.5" strokeWidth={1.5} />
+                Print
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {!selectedCompanyId ? (
+        <EmptyState
+          icon={isIn ? TrendingUp : TrendingDown}
+          title="Select a company"
+          description="Choose a company from the sidebar to view its money flow."
+        />
+      ) : filteredRows.length === 0 ? (
+        <EmptyState
+          icon={isIn ? TrendingUp : TrendingDown}
+          title={`No ${isIn ? 'money in' : 'money out'} recorded`}
+          description={`No ${isIn ? 'credit' : 'debit'} transactions found${year ? ` for ${year}` : ''}.`}
+        />
+      ) : (
+        <>
+          {/* KPI cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            {kpis.map((kpi) => (
+              <div key={kpi.label} className="bg-white border border-zinc-200 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${kpi.bg}`}>
+                    <kpi.icon className={`w-4 h-4 ${kpi.color}`} strokeWidth={1.5} />
+                  </div>
+                  <span className="text-xs font-medium text-zinc-500">{kpi.label}</span>
+                </div>
+                <div className="text-lg font-semibold text-zinc-900 leading-tight break-words">{kpi.value}</div>
+                {kpi.sub && <div className="text-xs text-zinc-500 mt-1">{kpi.sub}</div>}
+              </div>
+            ))}
+          </div>
+
+          {/* Chart + category */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+            <div className="lg:col-span-2 bg-white border border-zinc-200 rounded-xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-sm font-semibold text-zinc-900">
+                  {year ? `Monthly ${isIn ? 'Money In' : 'Money Out'} — ${year}` : `${isIn ? 'Money In' : 'Money Out'} by Year`}
+                </h2>
+                <span className="text-xs text-zinc-400">{formatCurrency(total)}</span>
+              </div>
+              <div className="flex items-end gap-1.5 h-40">
+                {bars.map((b, i) => (
+                  <div key={i} className="flex-1 flex flex-col items-center justify-end h-full min-w-0">
+                    <span className="text-[10px] text-zinc-400 mb-1 tabular-nums">{b.value > 0 ? formatCompact(b.value) : ''}</span>
+                    <div
+                      className={`w-full rounded-t ${isIn ? 'bg-emerald-500/80' : 'bg-zinc-900/85'}`}
+                      style={{ height: `${(b.value / maxBar) * 100}%`, minHeight: b.value > 0 ? 3 : 0 }}
+                    />
+                    <span className="text-[10px] text-zinc-400 mt-1.5 truncate w-full text-center">{b.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-white border border-zinc-200 rounded-xl p-5">
+              <h2 className="text-sm font-semibold text-zinc-900 mb-4">By Category</h2>
+              {categories.length === 0 ? (
+                <p className="text-sm text-zinc-400">No data</p>
+              ) : (
+                <div className="space-y-3">
+                  {categories.map((c) => (
+                    <div key={c.name}>
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="text-zinc-700 truncate">{c.name}</span>
+                        <span className="text-zinc-500 font-medium tabular-nums">{formatCurrency(c.value)}</span>
+                      </div>
+                      <div className="h-1.5 bg-zinc-100 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full ${isIn ? 'bg-emerald-500/70' : 'bg-zinc-900/70'}`} style={{ width: `${(c.value / maxCat) * 100}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Top payees */}
+          <div className="bg-white border border-zinc-200 rounded-xl p-5 mb-6">
+            <h2 className="text-sm font-semibold text-zinc-900 mb-4">
+              Top {isIn ? 'Sources' : 'Payees'}
+            </h2>
+            {topPayees.length === 0 ? (
+              <p className="text-sm text-zinc-400">No data</p>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
+                {topPayees.map((p, i) => (
+                  <div key={p.name} className="flex items-center gap-3">
+                    <span className="w-5 text-xs text-zinc-400 tabular-nums text-right">{i + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between text-xs mb-1 gap-2">
+                        <span className="text-zinc-700 truncate">{p.name}</span>
+                        <span className="text-zinc-500 font-medium tabular-nums shrink-0">{formatCurrency(p.value)}</span>
+                      </div>
+                      <div className="h-1.5 bg-zinc-100 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full ${isIn ? 'bg-emerald-500/70' : 'bg-zinc-900/70'}`} style={{ width: `${(p.value / maxPayee) * 100}%` }} />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Drill-down table */}
+          <div className="bg-white border border-zinc-200 rounded-xl overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-b border-zinc-100">
+              <h2 className="text-sm font-semibold text-zinc-900">Transactions</h2>
+              <div className="relative w-64 max-w-full">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" strokeWidth={1.5} />
+                <input
+                  className="input pl-9"
+                  placeholder="Search description, payee..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-zinc-100 text-left text-xs text-zinc-500">
+                    <th className="px-4 py-2.5 font-medium cursor-pointer select-none" onClick={() => toggleSort('date')}>
+                      Date {sortField === 'date' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                    </th>
+                    <th className="px-4 py-2.5 font-medium">Description</th>
+                    <th className="px-4 py-2.5 font-medium cursor-pointer select-none" onClick={() => toggleSort('payee')}>
+                      Payee {sortField === 'payee' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                    </th>
+                    <th className="px-4 py-2.5 font-medium cursor-pointer select-none" onClick={() => toggleSort('category')}>
+                      Category {sortField === 'category' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                    </th>
+                    <th className="px-4 py-2.5 font-medium cursor-pointer select-none text-right" onClick={() => toggleSort('amount')}>
+                      {isIn ? 'Credit' : 'Debit'} {sortField === 'amount' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRows.map((tx) => (
+                    <tr key={tx.id} className="border-b border-zinc-50 hover:bg-zinc-50/60">
+                      <td className="px-4 py-2 text-zinc-500 whitespace-nowrap tabular-nums">{tx.date}</td>
+                      <td className="px-4 py-2 text-zinc-700 max-w-md truncate" title={tx.description}>{tx.description}</td>
+                      <td className="px-4 py-2 text-zinc-700">{tx.payee || '—'}</td>
+                      <td className="px-4 py-2 text-zinc-500">{tx.category || '—'}</td>
+                      <td className={`px-4 py-2 text-right font-medium tabular-nums whitespace-nowrap ${isIn ? 'text-emerald-600' : 'text-zinc-900'}`}>
+                        {formatCurrency(isIn ? tx.credit_amount : tx.debit_amount)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="px-4 py-3 border-t border-zinc-100 text-xs text-zinc-500 flex items-center justify-between">
+              <span>{filteredRows.length} transaction{filteredRows.length !== 1 ? 's' : ''}</span>
+              <span>
+                {isIn ? 'Money In' : 'Money Out'}: <span className="font-medium text-zinc-900">{formatCurrency(total)}</span>
+              </span>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

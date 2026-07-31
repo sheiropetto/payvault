@@ -232,8 +232,7 @@ export default function Transactions() {
         tx.payee?.toLowerCase().includes(search.toLowerCase());
       const matchCategory = !filterCategory || tx.category === filterCategory;
       const matchType = filterType === 'all' ||
-        (filterType === 'debit' && (tx.debit_amount > 0)) ||
-        (filterType === 'credit' && (tx.credit_amount > 0));
+        (filterType === 'debit' && (tx.debit_amount > 0));
 
       const matchColCategory = !columnFilters.category || tx.category === columnFilters.category;
 
@@ -662,8 +661,7 @@ export default function Transactions() {
                   onChange={setFilterType}
                   options={[
                     { value: 'all', label: 'All' },
-                    { value: 'debit', label: 'Debit Only' },
-                    { value: 'credit', label: 'Credit Only' }
+                    { value: 'debit', label: 'Debit Only' }
                   ]}
                 />
               </div>
