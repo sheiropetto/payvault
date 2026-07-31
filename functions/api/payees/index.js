@@ -14,18 +14,29 @@ export async function onRequest(context) {
         return Response.json({ error: 'company_id required' }, { status: 400 });
       }
 
-      // Aggregate unique payees across all bank statements for this company
-      const { results } = await env.DB.prepare(`
+      const year = url.searchParams.get('year');
+
+      // Aggregate unique payees across all bank statements for this company,
+      // optionally scoped to a single year, with debit/credit totals.
+      let sql = `
         SELECT
           t.payee,
           COUNT(*) as tx_count,
-          COUNT(DISTINCT t.bank_statement_id) as stmt_count
+          COUNT(DISTINCT t.bank_statement_id) as stmt_count,
+          SUM(CASE WHEN t.debit_amount > 0 THEN t.debit_amount ELSE 0 END) as total_debit,
+          SUM(CASE WHEN t.credit_amount > 0 THEN t.credit_amount ELSE 0 END) as total_credit
         FROM transactions t
         JOIN bank_statements bs ON bs.id = t.bank_statement_id
         WHERE bs.company_id = ? AND t.payee IS NOT NULL AND t.payee != ''
-        GROUP BY t.payee
-        ORDER BY t.payee ASC
-      `).bind(companyId).all();
+      `;
+      const params = [companyId];
+      if (year && /^\d{4}$/.test(year)) {
+        sql += ' AND substr(t.date, 1, 4) = ?';
+        params.push(year);
+      }
+      sql += ' GROUP BY t.payee ORDER BY t.payee ASC';
+
+      const { results } = await env.DB.prepare(sql).bind(...params).all();
 
       return Response.json(results);
     }

@@ -109,7 +109,7 @@ export const api = {
   removeAuthorizedUser: (email) => request(`/auth/users?email=${encodeURIComponent(email)}`, { method: 'DELETE' }),
 
   // Payees
-  getPayees: (companyId) => request(`/payees?company_id=${companyId}`),
+  getPayees: (companyId, year) => request(`/payees?company_id=${companyId}${year ? `&year=${year}` : ''}`),
   renamePayee: (oldPayee, newPayee) => request('/payees', {
     method: 'PATCH', body: JSON.stringify({ oldPayee, newPayee }),
   }),

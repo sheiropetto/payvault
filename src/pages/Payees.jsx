@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Search, Pencil, Check, X, Users, Square, CheckSquare, Merge, Sparkles, Circle } from 'lucide-react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { Search, Pencil, Check, X, Users, Square, CheckSquare, Merge, Sparkles, Circle, Download, Printer } from 'lucide-react';
 import { api } from '../utils/api';
+import { formatCurrency } from '../utils/format';
 import { useCompany } from '../contexts/CompanyContext';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import EmptyState from '../components/ui/EmptyState';
@@ -8,7 +9,7 @@ import LoadingSpinner from '../components/ui/LoadingSpinner';
 import Select from '../components/ui/Select';
 
 export default function Payees() {
-  const { selectedCompanyId } = useCompany();
+  const { selectedCompanyId, selectedCompany } = useCompany();
   const [payees, setPayees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -19,6 +20,10 @@ export default function Payees() {
   const [confirm, setConfirm] = useState(null);
   const [selected, setSelected] = useState(new Set());
   const [mergeTarget, setMergeTarget] = useState(null);
+  const [statements, setStatements] = useState([]);
+  const [year, setYear] = useState('');
+  const yearTouched = useRef(false);
+  const yearRef = useRef('');
 
   // Batch duplicate groups: { variants: string[], selected: string }
   const [duplicateGroups, setDuplicateGroups] = useState(null);
@@ -27,20 +32,174 @@ export default function Payees() {
   const [bulkEditMode, setBulkEditMode] = useState(false);
   const [bulkEdits, setBulkEdits] = useState({});
 
+  const allYears = useMemo(() => {
+    return [...new Set(statements.map(s => s.year).filter(Boolean))].sort((a, b) => b - a);
+  }, [statements]);
+
+  useEffect(() => { yearRef.current = year; }, [year]);
+
+  useEffect(() => {
+    if (selectedCompanyId) {
+      yearTouched.current = false;
+      setYear('');
+      setSelected(new Set());
+      setMergeTarget(null);
+      setStatements([]);
+      loadStatements();
+    }
+  }, [selectedCompanyId]);
+
+  // Auto-default to the latest available year (one-time per company)
+  useEffect(() => {
+    if (allYears.length > 0 && !yearTouched.current && !year) {
+      setYear(String(allYears[0]));
+    }
+  }, [allYears, year]);
+
   useEffect(() => {
     if (selectedCompanyId) loadPayees();
-  }, [selectedCompanyId]);
+  }, [selectedCompanyId, year]);
+
+  async function loadStatements() {
+    try {
+      const data = await api.getStatements(selectedCompanyId);
+      setStatements(data || []);
+    } catch (err) {
+      console.error('Failed to load statements:', err);
+      setStatements([]);
+    }
+  }
 
   async function loadPayees() {
     setLoading(true);
     try {
-      const data = await api.getPayees(selectedCompanyId);
-      setPayees(data);
+      const reqYear = yearRef.current;
+      const data = await api.getPayees(selectedCompanyId, reqYear);
+      // Ignore stale responses if the year changed while this request was in flight
+      if (reqYear === yearRef.current) setPayees(data);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
     }
+  }
+
+  function esc(s) {
+    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function handleExportCSV() {
+    const rows = filtered.length ? filtered : payees;
+    if (!rows.length) return;
+    const headers = ['Payee', 'Transactions', 'Months', 'Debit (RM)', 'Credit (RM)', 'Net (RM)'];
+    const csvRows = [headers.join(',')];
+    for (const p of rows) {
+      const debit = Number(p.total_debit) || 0;
+      const credit = Number(p.total_credit) || 0;
+      csvRows.push([
+        `"${(p.payee || '').replace(/"/g, '""')}"`,
+        p.tx_count || 0,
+        p.stmt_count || 0,
+        debit.toFixed(2),
+        credit.toFixed(2),
+        (debit - credit).toFixed(2),
+      ].join(','));
+    }
+    const blob = new Blob(['\uFEFF' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `payee-report${year ? `-${year}` : '-all'}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function handlePrintReport() {
+    const rows = filtered.length ? filtered : payees;
+    if (!rows.length) return;
+    const companyName = selectedCompany?.name || 'Company';
+    const yearLabel = year ? String(year) : 'All Years';
+    const totalDebit = rows.reduce((s, p) => s + (Number(p.total_debit) || 0), 0);
+    const totalCredit = rows.reduce((s, p) => s + (Number(p.total_credit) || 0), 0);
+
+    const rowHtml = rows.map(p => {
+      const debit = Number(p.total_debit) || 0;
+      const credit = Number(p.total_credit) || 0;
+      return `<tr>
+        <td>${esc(p.payee)}</td>
+        <td class="num">${p.tx_count || 0}</td>
+        <td class="num">${p.stmt_count || 0}</td>
+        <td class="num">${formatCurrency(debit)}</td>
+        <td class="num">${formatCurrency(credit)}</td>
+        <td class="num">${formatCurrency(debit - credit)}</td>
+      </tr>`;
+    }).join('');
+
+    const html = `
+      <style>
+        .report-wrap { font-family: 'Inter', system-ui, sans-serif; color: #18181b; }
+        .report-head { text-align: center; margin-bottom: 20px; }
+        .report-head h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+        .report-head p { font-size: 12px; color: #52525b; margin: 2px 0; }
+        .report-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .report-table th { text-align: left; text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em; color: #52525b; padding: 8px 10px; border-bottom: 1px solid #d4d4d8; }
+        .report-table td { padding: 8px 10px; border-bottom: 1px solid #e4e4e7; }
+        .report-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+        .report-table tr.total td { font-weight: 600; border-top: 2px solid #d4d4d8; border-bottom: none; }
+      </style>
+      <div class="report-wrap">
+        <div class="report-head">
+          <h1>Payee Report — ${esc(companyName)}</h1>
+          <p>Year: ${esc(yearLabel)} &nbsp;·&nbsp; Generated: ${esc(new Date().toLocaleString('en-MY'))}</p>
+        </div>
+        <table class="report-table">
+          <thead>
+            <tr><th>Payee</th><th class="num">Transactions</th><th class="num">Months</th><th class="num">Debit (RM)</th><th class="num">Credit (RM)</th><th class="num">Net (RM)</th></tr>
+          </thead>
+          <tbody>
+            ${rowHtml}
+            <tr class="total">
+              <td>Total (${rows.length} payee${rows.length > 1 ? 's' : ''})</td><td class="num"></td><td class="num"></td>
+              <td class="num">${formatCurrency(totalDebit)}</td>
+              <td class="num">${formatCurrency(totalCredit)}</td>
+              <td class="num">${formatCurrency(totalDebit - totalCredit)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>`;
+
+    // Print overlay (modeled on the voucher print preview)
+    const existing = document.getElementById('payee-report-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'payee-report-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;overflow-y:auto;background:#f5f5f5;';
+
+    const content = document.createElement('div');
+    content.style.cssText = 'max-width:900px;margin:24px auto;padding:32px;background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1);';
+    content.innerHTML = html;
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'no-print';
+    toolbar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;padding:14px 20px;background:#fff;border-top:1px solid #ddd;display:flex;justify-content:center;gap:12px;z-index:10001;box-shadow:0 -2px 8px rgba(0,0,0,0.08);';
+
+    const printBtn = document.createElement('button');
+    printBtn.textContent = 'Print';
+    printBtn.style.cssText = 'padding:10px 28px;font-size:14px;cursor:pointer;background:#18181b;color:#fff;border:none;border-radius:8px;font-weight:500;';
+    printBtn.onclick = () => window.print();
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.style.cssText = 'padding:10px 28px;font-size:14px;cursor:pointer;background:#fff;color:#555;border:1px solid #ccc;border-radius:8px;';
+    closeBtn.onclick = () => overlay.remove();
+
+    toolbar.appendChild(printBtn);
+    toolbar.appendChild(closeBtn);
+
+    overlay.appendChild(content);
+    overlay.appendChild(toolbar);
+    document.body.appendChild(overlay);
   }
 
   const filtered = useMemo(() => {
@@ -411,6 +570,43 @@ export default function Payees() {
         </div>
       )}
 
+      {/* Year filter + report controls */}
+      {(allYears.length > 0 || statements.length > 0) && (
+        <div className="card mb-6">
+          <div className="flex items-center gap-4 flex-wrap">
+            <div className="w-32">
+              <label className="label">Year</label>
+              <Select
+                value={year}
+                onChange={(v) => { yearTouched.current = true; setYear(v); setSelected(new Set()); setMergeTarget(null); }}
+                placeholder="All years"
+                options={[{ value: '', label: 'All years' }, ...allYears.map(y => ({ value: String(y), label: String(y) }))]}
+              />
+            </div>
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                onClick={handleExportCSV}
+                disabled={!filtered.length}
+                className="border border-zinc-300 bg-transparent text-zinc-700 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-zinc-50 transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Export payee totals to CSV"
+              >
+                <Download className="w-3.5 h-3.5" strokeWidth={1.5} />
+                Export CSV
+              </button>
+              <button
+                onClick={handlePrintReport}
+                disabled={!filtered.length}
+                className="border border-zinc-300 bg-transparent text-zinc-700 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-zinc-50 transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Print payee annual report"
+              >
+                <Printer className="w-3.5 h-3.5" strokeWidth={1.5} />
+                Print Report
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Toolbar: Search + Merge */}
       {payees.length > 0 && (
         <div className="card mb-6">
@@ -502,8 +698,10 @@ export default function Payees() {
       {payees.length === 0 ? (
         <EmptyState
           icon={<Users className="w-8 h-8" strokeWidth={1.5} />}
-          title="No payees yet"
-          description="Payee names will appear here once you extract transactions from bank statements."
+          title={year ? `No payees in ${year}` : 'No payees yet'}
+          description={year
+            ? 'No transactions with a payee were found for this year. Try another year or "All years".'
+            : 'Payee names will appear here once you extract transactions from bank statements.'}
         />
       ) : filtered.length === 0 ? (
         <div className="card text-center py-12 text-zinc-500 text-sm">
@@ -532,6 +730,12 @@ export default function Payees() {
                   </th>
                   <th className="text-right text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-3 whitespace-nowrap">
                     Months
+                  </th>
+                  <th className="text-right text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-3 whitespace-nowrap">
+                    Debit (RM)
+                  </th>
+                  <th className="text-right text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-3 whitespace-nowrap">
+                    Credit (RM)
                   </th>
                   <th className="text-right text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-3 whitespace-nowrap">
                     Actions
@@ -584,6 +788,12 @@ export default function Payees() {
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         <span className="text-sm text-zinc-500 tabular-nums">{p.stmt_count}</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <span className="text-sm text-zinc-700 tabular-nums">{formatCurrency(p.total_debit)}</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <span className="text-sm text-emerald-600 tabular-nums">{formatCurrency(p.total_credit)}</span>
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         {isEditing ? (

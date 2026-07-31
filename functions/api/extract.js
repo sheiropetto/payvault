@@ -1120,28 +1120,32 @@ export async function onRequest(context) {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
-    let insertedCount = 0;
-    let skippedCredits = 0;
+    let insertedDebits = 0;
+    let insertedCredits = 0;
+    let skippedCount = 0;
     for (const tx of transactions) {
-      // Only insert debit transactions (payments) — skip credits/deposits
-      if ((tx.debit_amount || 0) <= 0) {
-        skippedCredits++;
+      const debit = (tx.debit_amount || 0) > 0 ? (tx.debit_amount || 0) : 0;
+      const credit = (tx.credit_amount || 0) > 0 ? (tx.credit_amount || 0) : 0;
+      // Skip rows with no amount — but persist both debits (payments) and credits (deposits)
+      if (debit <= 0 && credit <= 0) {
+        skippedCount++;
         continue;
       }
       try {
         // Fallback particulars for non-CSV entries
-        const txParticulars = tx.particulars || 'Payment';
+        const txParticulars = tx.particulars || (credit > 0 ? 'Deposit' : 'Payment');
         await insertStmt.bind(
           statement_id,
           tx.date,
           tx.description,
-          tx.debit_amount || 0,
-          0,
-          tx.category || 'Other',
+          debit,
+          credit,
+          tx.category || (credit > 0 ? 'Credit/Deposit' : 'Other'),
           tx.payee || '',
           txParticulars
         ).run();
-        insertedCount++;
+        if (credit > 0) insertedCredits++;
+        else insertedDebits++;
       } catch (e) {
         console.error('Skipping transaction:', e.message);
       }
@@ -1163,19 +1167,22 @@ export async function onRequest(context) {
         "UPDATE bank_statements SET status = 'done', year = ?, month = ?, filename = ? WHERE id = ?"
       ).bind(detectedYear, detectedMonth, properName, statement_id).run();
 
+      const totalInserted = insertedDebits + insertedCredits;
       return Response.json({
         success: true,
         provider,
         total_extracted: transactions.length,
-        total_inserted: insertedCount,
-        skipped_credits: skippedCredits,
+        total_inserted: totalInserted,
+        inserted_debits: insertedDebits,
+        inserted_credits: insertedCredits,
+        skipped_credits: skippedCount,
         corrections: corrections.length,
         correction_details: corrections,
         message: stmt.file_type === 'csv'
-          ? `[System] Extracted ${insertedCount} debits (${skippedCredits} credits skipped)`
+          ? `[System] Extracted ${insertedDebits} debit(s) · ${insertedCredits} credit(s) saved`
           : corrections.length > 0
-            ? `[${provider}] Extracted ${insertedCount} debits · ${skippedCredits} credits skipped · Auto-corrected ${corrections.length} amount(s)`
-            : `[${provider}] Extracted ${insertedCount} debits (${skippedCredits} credits skipped)`,
+            ? `[${provider}] Extracted ${insertedDebits} debit(s) · ${insertedCredits} credit(s) saved · Auto-corrected ${corrections.length} amount(s)`
+            : `[${provider}] Extracted ${insertedDebits} debit(s) · ${insertedCredits} credit(s) saved`,
       });
     } else {
       return Response.json({
