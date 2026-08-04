@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  TrendingUp, TrendingDown, Download, Printer, Search, Wallet, Receipt, CalendarRange, Crown
+  TrendingUp, TrendingDown, Download, Printer, Search, Wallet, Receipt, CalendarRange, Crown, ChevronUp, ChevronDown
 } from 'lucide-react';
 import { api } from '../../utils/api';
 import { formatCurrency } from '../../utils/format';
@@ -31,6 +31,7 @@ export default function CashFlow({ direction }) {
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState('date');
   const [sortDir, setSortDir] = useState('desc');
+  const [showAllPayees, setShowAllPayees] = useState(false);
 
   const yearTouched = useRef(false);
   const yearRef = useRef('');
@@ -152,10 +153,11 @@ export default function CashFlow({ direction }) {
     return (data?.by_payee || [])
       .map(p => ({ name: p.payee, value: Number(isIn ? p.credit : p.debit) || 0 }))
       .filter(p => p.value > 0)
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 10);
+      .sort((a, b) => b.value - a.value);
   }, [data, isIn]);
   const maxPayee = Math.max(1, ...topPayees.map(p => p.value));
+  // Show top 10 by default; expand to reveal every payee (top to least).
+  const visibleTopPayees = showAllPayees ? topPayees : topPayees.slice(0, 10);
 
   // ── Drill-down table ──
   const rows = useMemo(() => {
@@ -295,8 +297,9 @@ export default function CashFlow({ direction }) {
         .join('');
     }
 
-    // Top counterparties
-    const topRows = topPayees.map(p =>
+    // Top counterparties (report stays concise: top 10)
+    const reportTopPayees = topPayees.slice(0, 10);
+    const topRows = reportTopPayees.map(p =>
       `<tr><td>${esc(p.name)}</td><td class="num">${formatCurrency(p.value)}</td><td class="num">${maxPayee ? ((p.value / maxPayee) * 100).toFixed(1) : '0.0'}%</td></tr>`
     ).join('');
 
@@ -341,7 +344,7 @@ export default function CashFlow({ direction }) {
 
       ${topRows ? `
       <div class="report-section keep">
-        <h2>Top ${isIn ? 'Sources' : 'Payees'} (${topPayees.length})</h2>
+        <h2>Top ${isIn ? 'Sources' : 'Payees'} (${reportTopPayees.length})</h2>
         <table>
           <thead><tr><th>Name</th><th class="num">${amountLabel}</th><th class="num">% of Total</th></tr></thead>
           <tbody>${topRows}</tbody>
@@ -504,14 +507,37 @@ export default function CashFlow({ direction }) {
 
           {/* Top payees */}
           <div className="bg-white border border-zinc-200 rounded-xl p-5 mb-6">
-            <h2 className="text-sm font-semibold text-zinc-900 mb-4">
-              Top {isIn ? 'Sources' : 'Payees'}
-            </h2>
-            {topPayees.length === 0 ? (
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <h2 className="text-sm font-semibold text-zinc-900">
+                Top {isIn ? 'Sources' : 'Payees'}
+                <span className="ml-2 text-xs font-normal text-zinc-400">
+                  {showAllPayees ? topPayees.length : `${Math.min(10, topPayees.length)} of ${topPayees.length}`}
+                </span>
+              </h2>
+              {topPayees.length > 10 && (
+                <button
+                  onClick={() => setShowAllPayees(v => !v)}
+                  className="text-xs font-medium text-zinc-600 hover:text-zinc-900 border border-zinc-300 bg-transparent rounded-lg px-3 py-1.5 hover:bg-zinc-50 transition-colors flex items-center gap-1.5"
+                >
+                  {showAllPayees ? (
+                    <>
+                      <ChevronUp className="w-3.5 h-3.5" strokeWidth={1.5} />
+                      Show less
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-3.5 h-3.5" strokeWidth={1.5} />
+                      Show all ({topPayees.length})
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+            {visibleTopPayees.length === 0 ? (
               <p className="text-sm text-zinc-400">No data</p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-                {topPayees.map((p, i) => (
+                {visibleTopPayees.map((p, i) => (
                   <div key={p.name} className="flex items-center gap-3">
                     <span className="w-5 text-xs text-zinc-400 tabular-nums text-right">{i + 1}</span>
                     <div className="flex-1 min-w-0">
