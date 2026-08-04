@@ -221,6 +221,158 @@ export default function CashFlow({ direction }) {
     URL.revokeObjectURL(url);
   }
 
+  // ── Print report (standalone window, like the vouchers report) ──
+  function esc(s) {
+    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function printHTML(html) {
+    const win = window.open('', '_blank');
+    win.document.write(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <title>${esc(title)} Report</title>
+        <style>
+          @page { size: A4 landscape; margin: 10mm; }
+          * { box-sizing: border-box; }
+          body { font-family: 'Inter', system-ui, sans-serif; color: #18181b; margin: 0; font-size: 12px; }
+          .report-head { text-align: center; margin-bottom: 18px; }
+          .report-head h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+          .report-head p { font-size: 12px; color: #52525b; margin: 2px 0; }
+          .summary-cards { display: flex; gap: 10px; }
+          .summary-card { flex: 1; border: 1px solid #e4e4e7; border-radius: 8px; padding: 10px 12px; }
+          .summary-card .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: #52525b; }
+          .summary-card .val { font-size: 15px; font-weight: 600; margin-top: 4px; }
+          .summary-card .sub { font-size: 10px; color: #71717a; margin-top: 2px; word-break: break-word; }
+          .report-section { margin-top: 20px; }
+          .report-section h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px; padding-bottom: 4px; border-bottom: 2px solid #e4e4e7; }
+          .keep { page-break-inside: avoid; }
+          table { width: 100%; border-collapse: collapse; font-size: 10px; }
+          thead { display: table-header-group; }
+          th { text-align: left; text-transform: uppercase; font-size: 8px; letter-spacing: 0.05em; color: #52525b; padding: 5px 8px; border-bottom: 1px solid #d4d4d8; background: #fafafa; }
+          td { padding: 5px 8px; border-bottom: 1px solid #ececee; vertical-align: top; }
+          .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+          .nowrap { white-space: nowrap; }
+          .strong { font-weight: 600; }
+          tr.total td { font-weight: 600; border-top: 2px solid #d4d4d8; background: #fafafa; }
+          .muted { color: #71717a; }
+          .no-print { text-align: center; padding: 20px; }
+          .no-print button { padding: 10px 30px; font-size: 14px; cursor: pointer; background: #18181b; color: #fff; border: none; border-radius: 8px; }
+          @media print { .no-print { display: none; } }
+        </style>
+      </head>
+      <body>
+        ${html}
+        <div class="no-print">
+          <button onclick="window.print()">Print / Save PDF</button>
+        </div>
+      </body>
+      </html>
+    `);
+    win.document.close();
+  }
+
+  function handlePrintReport() {
+    if (!filteredRows.length) return;
+    const companyName = selectedCompany?.name || 'Company';
+    const yearLabel = year ? String(year) : 'All Years';
+    const directionLabel = isIn ? 'Money In' : 'Money Out';
+    const amountLabel = isIn ? 'Credit (RM)' : 'Debit (RM)';
+
+    // Monthly (or yearly) period breakdown
+    let periodRows = '';
+    if (year) {
+      const map = {};
+      for (const m of (data?.by_month || [])) map[m.month] = Number(isIn ? m.credit : m.debit) || 0;
+      periodRows = MONTH_NAMES.map((mn, i) =>
+        `<tr><td>${mn}</td><td class="num">${map[i + 1] ? formatCurrency(map[i + 1]) : ''}</td></tr>`
+      ).join('');
+    } else {
+      periodRows = (data?.by_year || [])
+        .map(y => `<tr><td>${esc(String(y.year))}</td><td class="num">${formatCurrency(Number(isIn ? y.credit : y.debit) || 0)}</td></tr>`)
+        .join('');
+    }
+
+    // Top counterparties
+    const topRows = topPayees.map(p =>
+      `<tr><td>${esc(p.name)}</td><td class="num">${formatCurrency(p.value)}</td><td class="num">${maxPayee ? ((p.value / maxPayee) * 100).toFixed(1) : '0.0'}%</td></tr>`
+    ).join('');
+
+    // Categories
+    const catRows = categories.map(c =>
+      `<tr><td>${esc(c.name)}</td><td class="num">${c.count}</td><td class="num">${formatCurrency(c.value)}</td><td class="num">${maxCat ? ((c.value / maxCat) * 100).toFixed(1) : '0.0'}%</td></tr>`
+    ).join('');
+
+    // Transactions drill-down
+    const txRows = filteredRows.map(tx =>
+      `<tr>
+        <td class="nowrap">${esc(tx.date)}</td>
+        <td>${esc(tx.description)}</td>
+        <td>${esc(tx.particulars)}</td>
+        <td>${esc(tx.payee)}</td>
+        <td>${esc(tx.category)}</td>
+        <td class="num">${formatCurrency(Number(isIn ? tx.credit_amount : tx.debit_amount) || 0)}</td>
+      </tr>`
+    ).join('');
+    const txTotal = filteredRows.reduce((s, tx) => s + (Number(isIn ? tx.credit_amount : tx.debit_amount) || 0), 0);
+
+    const html = `
+      <div class="report-head">
+        <h1>${directionLabel} Report — ${esc(companyName)}</h1>
+        <p>Year: ${esc(yearLabel)} &nbsp;·&nbsp; Generated: ${esc(new Date().toLocaleString('en-MY'))}</p>
+      </div>
+
+      <div class="summary-cards keep">
+        <div class="summary-card"><div class="lbl">Total ${directionLabel}</div><div class="val">${formatCurrency(total)}</div></div>
+        <div class="summary-card"><div class="lbl">${isIn ? 'Credits' : 'Payments'}</div><div class="val">${count.toLocaleString()}</div></div>
+        <div class="summary-card"><div class="lbl">${year ? 'Monthly' : 'Yearly'} Average</div><div class="val">${formatCurrency(monthlyAvg)}</div><div class="sub">per ${year ? 'month' : 'year'}</div></div>
+        <div class="summary-card"><div class="lbl">${isIn ? 'Top Source' : 'Top Payee'}</div><div class="val">${esc(topCounterparty?.name || '—')}</div><div class="sub">${topCounterparty ? formatCurrency(topCounterparty.value) : ''}</div></div>
+      </div>
+
+      <div class="report-section keep">
+        <h2>${year ? `Monthly ${directionLabel} — ${yearLabel}` : `${directionLabel} by Year`}</h2>
+        <table>
+          <thead><tr><th>${year ? 'Month' : 'Year'}</th><th class="num">${amountLabel}</th></tr></thead>
+          <tbody>${periodRows}</tbody>
+        </table>
+      </div>
+
+      ${topRows ? `
+      <div class="report-section keep">
+        <h2>Top ${isIn ? 'Sources' : 'Payees'} (${topPayees.length})</h2>
+        <table>
+          <thead><tr><th>Name</th><th class="num">${amountLabel}</th><th class="num">% of Total</th></tr></thead>
+          <tbody>${topRows}</tbody>
+        </table>
+      </div>` : ''}
+
+      ${catRows ? `
+      <div class="report-section keep">
+        <h2>Category Breakdown</h2>
+        <table>
+          <thead><tr><th>Category</th><th class="num">Txns</th><th class="num">${amountLabel}</th><th class="num">% of Total</th></tr></thead>
+          <tbody>${catRows}</tbody>
+        </table>
+      </div>` : ''}
+
+      <div class="report-section">
+        <h2>Transactions (${filteredRows.length})</h2>
+        <table>
+          <thead>
+            <tr><th>Date</th><th>Description</th><th>Particulars</th><th>Payee</th><th>Category</th><th class="num">${amountLabel}</th></tr>
+          </thead>
+          <tbody>
+            ${txRows}
+            <tr class="total"><td colspan="5">Total (${filteredRows.length} transactions)</td><td class="num strong">${formatCurrency(txTotal)}</td></tr>
+          </tbody>
+        </table>
+      </div>`;
+
+    printHTML(html);
+  }
+
   if (loading) return <LoadingSpinner />;
 
   const title = isIn ? 'Money In' : 'Money Out';
@@ -264,7 +416,7 @@ export default function CashFlow({ direction }) {
               </button>
               <button
                 className="btn-ghost text-xs flex items-center gap-1.5 h-9 px-3 rounded-lg border border-zinc-300 bg-transparent text-zinc-700 hover:bg-zinc-50"
-                onClick={() => window.print()}
+                onClick={handlePrintReport}
                 disabled={!filteredRows.length}
               >
                 <Printer className="w-3.5 h-3.5" strokeWidth={1.5} />
