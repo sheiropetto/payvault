@@ -237,14 +237,14 @@ export default function CashFlow({ direction }) {
         <meta charset="utf-8" />
         <title>${esc(title)} Report</title>
         <style>
-          @page { size: A4 landscape; margin: 12mm; }
+          @page { size: A4 portrait; margin: 12mm; }
           * { box-sizing: border-box; }
           body { font-family: 'Inter', system-ui, sans-serif; color: #18181b; margin: 0; font-size: 14px; }
           .report-head { text-align: center; margin-bottom: 22px; }
           .report-head h1 { font-size: 26px; font-weight: 700; margin: 0 0 6px; }
           .report-head p { font-size: 14px; color: #52525b; margin: 3px 0; }
-          .summary-cards { display: flex; gap: 12px; }
-          .summary-card { flex: 1; border: 1px solid #d4d4d8; border-radius: 10px; padding: 14px 16px; }
+          .summary-cards { display: flex; flex-wrap: wrap; gap: 12px; }
+          .summary-card { flex: 1 1 42%; border: 1px solid #d4d4d8; border-radius: 10px; padding: 14px 16px; }
           .summary-card .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #52525b; }
           .summary-card .val { font-size: 19px; font-weight: 700; margin-top: 6px; }
           .summary-card .sub { font-size: 12px; color: #71717a; margin-top: 4px; word-break: break-word; }
