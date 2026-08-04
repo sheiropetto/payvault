@@ -99,6 +99,7 @@ export default function Payees() {
   const [statements, setStatements] = useState([]);
   const [year, setYear] = useState('');
   const yearRef = useRef('');
+  const restoreScrollRef = useRef(null);
 
   // Batch duplicate groups: { variants: string[], selected: string }
   const [duplicateGroups, setDuplicateGroups] = useState(null);
@@ -137,19 +138,33 @@ export default function Payees() {
     }
   }
 
-  async function loadPayees() {
-    setLoading(true);
+  async function loadPayees(silent = false) {
+    // Silent refreshes (after rename/merge/save) keep the page mounted so the
+    // scroll position is preserved instead of the full-page spinner jumping to top.
+    if (!silent) setLoading(true);
+    const restoreY = silent ? window.scrollY : null;
     try {
       const reqYear = yearRef.current;
       const data = await api.getPayees(selectedCompanyId, reqYear);
       // Ignore stale responses if the year changed while this request was in flight
-      if (reqYear === yearRef.current) setPayees(data);
+      if (reqYear === yearRef.current) {
+        setPayees(data);
+        if (restoreY != null) restoreScrollRef.current = restoreY;
+      }
     } catch (err) {
       console.error(err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
+
+  // After a silent refresh, put the viewport back where the user was.
+  useEffect(() => {
+    if (restoreScrollRef.current == null) return;
+    const y = restoreScrollRef.current;
+    restoreScrollRef.current = null;
+    requestAnimationFrame(() => window.scrollTo({ top: y }));
+  }, [payees]);
 
   function esc(s) {
     return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -495,7 +510,7 @@ export default function Payees() {
           const result = await api.batchMergePayees(merges);
           setStatus({ type: 'success', message: `${result.totalUpdated} transaction(s) updated across ${result.merges.length} groups.` });
           setDuplicateGroups(null);
-          await loadPayees();
+          await loadPayees(true);
           setTimeout(() => setStatus(null), 4000);
         } catch (err) {
           setStatus({ type: 'error', message: err.message });
@@ -536,7 +551,7 @@ export default function Payees() {
           setStatus({ type: 'success', message: `${result.updated} transaction(s) updated.` });
           setEditingId(null);
           setEditValue('');
-          await loadPayees();
+          await loadPayees(true);
           setTimeout(() => setStatus(null), 3000);
         } catch (err) {
           setStatus({ type: 'error', message: err.message });
@@ -568,7 +583,7 @@ export default function Payees() {
           setStatus({ type: 'success', message: `${result.updated} transaction(s) merged.` });
           setSelected(new Set());
           setMergeTarget(null);
-          await loadPayees();
+          await loadPayees(true);
           setTimeout(() => setStatus(null), 3000);
         } catch (err) {
           setStatus({ type: 'error', message: err.message });
@@ -619,7 +634,7 @@ export default function Payees() {
           }
           setStatus({ type: 'success', message: `${total} transaction(s) updated across ${changes.length} payees.` });
           cancelBulkEdit();
-          await loadPayees();
+          await loadPayees(true);
           setTimeout(() => setStatus(null), 4000);
         } catch (err) {
           setStatus({ type: 'error', message: err.message });
