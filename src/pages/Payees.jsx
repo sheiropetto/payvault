@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Pencil, Check, X, Users, Square, CheckSquare, Merge, Sparkles, Circle, Download, Printer, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { Search, Pencil, Check, X, Users, Square, CheckSquare, Merge, Sparkles, Circle, Download, Printer, ShieldCheck, AlertTriangle, BarChart3 } from 'lucide-react';
 import { api } from '../utils/api';
 import { formatCurrency } from '../utils/format';
 import { useCompany } from '../contexts/CompanyContext';
@@ -107,6 +107,9 @@ export default function Payees() {
   // Bulk edit mode: edits all names at once
   const [bulkEditMode, setBulkEditMode] = useState(false);
   const [bulkEdits, setBulkEdits] = useState({});
+
+  // Tabs: 'payees' | 'summary'
+  const [view, setView] = useState('payees');
 
   const allYears = useMemo(() => {
     return [...new Set(statements.map(s => s.year).filter(Boolean))].sort((a, b) => b - a);
@@ -815,8 +818,36 @@ export default function Payees() {
         </div>
       )}
 
+      {/* Tabs: Yearly Summary / Payees */}
+      {payees.length > 0 && (
+        <div className="mb-6 inline-flex items-center gap-1 p-1 bg-zinc-100 border border-zinc-200 rounded-lg">
+          <button
+            onClick={() => setView('payees')}
+            className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-md transition-colors ${
+              view === 'payees' ? 'bg-zinc-900 text-white' : 'text-zinc-600 hover:bg-zinc-200/60 hover:text-zinc-900'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" strokeWidth={1.5} />
+            Payees
+            <span className={`text-[10px] tabular-nums ${view === 'payees' ? 'text-zinc-300' : 'text-zinc-400'}`}>{payees.length}</span>
+          </button>
+          <button
+            onClick={() => setView('summary')}
+            className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-md transition-colors ${
+              view === 'summary' ? 'bg-zinc-900 text-white' : 'text-zinc-600 hover:bg-zinc-200/60 hover:text-zinc-900'
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5" strokeWidth={1.5} />
+            Yearly Summary
+            {filtered.length > 0 && (
+              <span className={`text-[10px] tabular-nums ${view === 'summary' ? 'text-zinc-300' : 'text-zinc-400'}`}>{filtered.length}</span>
+            )}
+          </button>
+        </div>
+      )}
+
       {/* Yearly summary — total payments out per payee for the selected year */}
-      {filtered.length > 0 && (
+      {view === 'summary' && filtered.length > 0 && (
         <div className="card mb-6">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-zinc-700">
@@ -844,7 +875,7 @@ export default function Payees() {
       )}
 
       {/* Toolbar: Search + Merge */}
-      {payees.length > 0 && (
+      {view === 'payees' && payees.length > 0 && (
         <div className="card mb-6">
           <div className="flex items-center gap-4 flex-wrap">
             <div className="relative flex-1 max-w-sm">
@@ -879,7 +910,7 @@ export default function Payees() {
       )}
 
       {/* Payees list */}
-      {payees.length === 0 ? (
+      {view === 'payees' && (payees.length === 0 ? (
         <EmptyState
           icon={Users}
           title={year ? `No payees in ${year}` : 'No payees yet'}
@@ -1018,7 +1049,7 @@ export default function Payees() {
             </table>
           </div>
         </div>
-      )}
+      ))}
 
       {/* Floating action bar — merge (2+ selected) / bulk edit save */}
       {(selected.size >= 2 || bulkEditMode) && (
