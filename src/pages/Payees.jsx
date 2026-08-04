@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Pencil, Check, X, Users, Square, CheckSquare, Merge, Sparkles, Circle, Download, Printer } from 'lucide-react';
+import { Search, Pencil, Check, X, Users, Square, CheckSquare, Merge, Sparkles, Circle, Download, Printer, ShieldCheck, AlertTriangle } from 'lucide-react';
 import { api } from '../utils/api';
 import { formatCurrency } from '../utils/format';
 import { useCompany } from '../contexts/CompanyContext';
@@ -7,6 +7,82 @@ import ConfirmModal from '../components/ui/ConfirmModal';
 import EmptyState from '../components/ui/EmptyState';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import Select from '../components/ui/Select';
+
+// ─── Duplicate payee detection (normalization + fuzzy matching) ───
+const OCR_NOISE_RE = /[\]\[|!@#"$%^&*()_+=<>?`~;,:'\\]/g;
+const STRUCTURE_TOKENS = new Set(['sdn', 'bhd', 'berhad', 's/b', 'sdnbhd', 'ltd', 'inc', 'llc', 'pte', 'ptd']);
+const HONORIFICS = new Set([
+  'cik', 'encik', 'en', 'pn', 'ci', 'dato', 'datuk', 'datin', 'haji', 'hajjah', 'hajah',
+  'mr', 'mrs', 'ms', 'dr', 'ir', 'tuan', 'puan', 'sir', 'madam', 'allahyarham', 'arwah',
+]);
+
+function normalizeKey(name) {
+  let s = String(name || '').toLowerCase();
+  s = s.replace(/&/g, ' and ');              // & → and
+  s = s.replace(OCR_NOISE_RE, ' ');          // OCR noise chars → space
+  s = s.replace(/\./g, ' ');                 // dots → space (SDN. BHD. → SDN BHD)
+  s = s.replace(/\bbint[e]?\b/g, ' binti '); // BINT / BINTE / BINTI → BINTI
+  s = s.replace(/\s+/g, ' ').trim();
+  const words = s.split(' ').filter(Boolean);
+  // Drop honorific titles and pure legal-structure tokens; keep identity words.
+  return words
+    .filter(w => !HONORIFICS.has(w.replace(/'/g, '')) && !STRUCTURE_TOKENS.has(w))
+    .join(' ');
+}
+
+function jaroWinkler(a, b) {
+  if (a === b) return 1;
+  const lenA = a.length, lenB = b.length;
+  if (!lenA || !lenB) return 0;
+  const matchDist = Math.max(0, Math.floor(Math.max(lenA, lenB) / 2) - 1);
+  const aMatch = new Array(lenA).fill(false);
+  const bMatch = new Array(lenB).fill(false);
+  let matches = 0;
+  for (let i = 0; i < lenA; i++) {
+    const start = Math.max(0, i - matchDist);
+    const end = Math.min(i + matchDist + 1, lenB);
+    for (let j = start; j < end; j++) {
+      if (!bMatch[j] && a[i] === b[j]) { aMatch[i] = true; bMatch[j] = true; matches++; break; }
+    }
+  }
+  if (!matches) return 0;
+  let transpositions = 0, k = 0;
+  for (let i = 0; i < lenA; i++) {
+    if (!aMatch[i]) continue;
+    while (!bMatch[k]) k++;
+    if (a[i] !== b[k]) transpositions++;
+    k++;
+  }
+  const jaro = (matches / lenA + matches / lenB + (matches - transpositions / 2) / matches) / 3;
+  let prefix = 0;
+  const maxPrefix = Math.min(4, lenA, lenB);
+  while (prefix < maxPrefix && a[prefix] === b[prefix]) prefix++;
+  return jaro + prefix * 0.1 * (1 - jaro);
+}
+
+function tokenSimilarity(a, b) {
+  const ta = a.split(' ').filter(Boolean);
+  const tb = b.split(' ').filter(Boolean);
+  if (!ta.length && !tb.length) return 1;
+  const sa = new Set(ta), sb = new Set(tb);
+  let inter = 0;
+  for (const t of sa) if (sb.has(t)) inter++;
+  const union = sa.size + sb.size - inter;
+  return union ? inter / union : 0;
+}
+
+function tokenContainment(a, b) {
+  const ta = a.split(' ').filter(Boolean);
+  const tb = new Set(b.split(' ').filter(Boolean));
+  if (!ta.length) return 0;
+  let hits = 0;
+  for (const t of ta) if (tb.has(t)) hits++;
+  return hits / ta.length;
+}
+
+function nameSimilarity(a, b) {
+  return Math.max(jaroWinkler(a, b), tokenSimilarity(a, b));
+}
 
 export default function Payees() {
   const { selectedCompanyId, selectedCompany } = useCompany();
@@ -22,7 +98,6 @@ export default function Payees() {
   const [mergeTarget, setMergeTarget] = useState(null);
   const [statements, setStatements] = useState([]);
   const [year, setYear] = useState('');
-  const yearTouched = useRef(false);
   const yearRef = useRef('');
 
   // Batch duplicate groups: { variants: string[], selected: string }
@@ -40,7 +115,6 @@ export default function Payees() {
 
   useEffect(() => {
     if (selectedCompanyId) {
-      yearTouched.current = false;
       setYear('');
       setSelected(new Set());
       setMergeTarget(null);
@@ -48,13 +122,6 @@ export default function Payees() {
       loadStatements();
     }
   }, [selectedCompanyId]);
-
-  // Auto-default to the latest available year (one-time per company)
-  useEffect(() => {
-    if (allYears.length > 0 && !yearTouched.current && !year) {
-      setYear(String(allYears[0]));
-    }
-  }, [allYears, year]);
 
   useEffect(() => {
     if (selectedCompanyId) loadPayees();
@@ -302,61 +369,43 @@ export default function Payees() {
   }
 
   function handleFindDuplicates() {
-    function normalize(name) {
-      return name.toLowerCase()
-        .replace(/\./g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-    }
-
-    // Group by normalized form
-    const normMap = new Map();
-    for (const p of payees) {
-      const norm = normalize(p.payee);
-      if (!normMap.has(norm)) normMap.set(norm, []);
-      normMap.get(norm).push(p.payee);
-    }
-
-    // Build raw groups
-    const rawGroups = [];
-
-    // Step 1: exact normalization matches (e.g., dot differences)
-    for (const [, group] of normMap) {
-      if (group.length >= 2) rawGroups.push([...group]);
-    }
-
-    // Step 2: substring matches (e.g., truncation)
-    const norms = [...normMap.keys()];
-    for (let i = 0; i < norms.length; i++) {
-      for (let j = i + 1; j < norms.length; j++) {
-        const longer = norms[i].length > norms[j].length ? norms[i] : norms[j];
-        const shorter = norms[i].length > norms[j].length ? norms[j] : norms[i];
-        if (shorter.length >= 4 && longer.includes(shorter) && shorter.length / longer.length >= 0.6) {
-          const all = [...new Set([...normMap.get(norms[i]), ...normMap.get(norms[j])])];
-          if (all.length >= 2) rawGroups.push(all);
-        }
-      }
-    }
-
-    // Deduplicate: each name in only one group, largest groups first
     const used = new Set();
     const finalGroups = [];
-    rawGroups.sort((a, b) => b.length - a.length);
-    for (const g of rawGroups) {
-      const fresh = g.filter(n => !used.has(n));
-      if (fresh.length >= 2) {
-        // Pick the variant with most transactions as default selection
-        const withCounts = fresh.map(name => {
-          const p = payees.find(x => x.payee === name);
-          return { name, txCount: p?.tx_count || 0, stmtCount: p?.stmt_count || 0 };
-        });
-        withCounts.sort((a, b) => b.txCount - a.txCount);
-        finalGroups.push({
-          variants: withCounts,
-          selected: withCounts[0].name, // default: highest tx count
-        });
-        fresh.forEach(n => used.add(n));
+
+    // Pass 1 — exact normalized keys → SAFE (formatting / OCR-only differences)
+    const byKey = new Map();
+    for (const p of payees) {
+      const key = normalizeKey(p.payee);
+      if (!key) continue;
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key).push(p.payee);
+    }
+    for (const names of byKey.values()) {
+      if (names.length < 2) continue;
+      finalGroups.push(makeDuplicateGroup(names, 'safe'));
+      names.forEach(n => used.add(n));
+    }
+
+    // Pass 2 — fuzzy matches among the rest → REVIEW (shared base, possibly distinct payments)
+    const remaining = payees.filter(p => !used.has(p.payee) && normalizeKey(p.payee));
+    for (let i = 0; i < remaining.length; i++) {
+      const seed = remaining[i];
+      if (used.has(seed.payee)) continue;
+      const seedKey = normalizeKey(seed.payee);
+      const cluster = [seed.payee];
+      used.add(seed.payee);
+      for (let j = i + 1; j < remaining.length; j++) {
+        const cand = remaining[j];
+        if (used.has(cand.payee)) continue;
+        const candKey = normalizeKey(cand.payee);
+        const sim = nameSimilarity(seedKey, candKey);
+        const cont = Math.max(tokenContainment(seedKey, candKey), tokenContainment(candKey, seedKey));
+        if (sim >= 0.86 || (sim >= 0.6 && cont >= 0.7)) {
+          cluster.push(cand.payee);
+          used.add(cand.payee);
+        }
       }
+      if (cluster.length >= 2) finalGroups.push(makeDuplicateGroup(cluster, 'review'));
     }
 
     if (finalGroups.length === 0) {
@@ -369,8 +418,35 @@ export default function Payees() {
     setSelected(new Set());
     setMergeTarget(null);
 
+    const safeCount = finalGroups.filter(g => g.tier === 'safe').length;
+    const reviewCount = finalGroups.length - safeCount;
     const totalDupes = finalGroups.reduce((s, g) => s + g.variants.length - 1, 0);
-    setStatus({ type: 'success', message: `Found ${finalGroups.length} duplicate group(s) with ${totalDupes} redundant names. Pick the canonical name for each and save.` });
+    setStatus({
+      type: 'success',
+      message: `Found ${finalGroups.length} duplicate group(s) with ${totalDupes} redundant names — ${safeCount} safe to merge, ${reviewCount} need review.`,
+    });
+  }
+
+  function makeDuplicateGroup(names, tier) {
+    const withCounts = names.map(name => {
+      const p = payees.find(x => x.payee === name);
+      return { name, txCount: p?.tx_count || 0, stmtCount: p?.stmt_count || 0 };
+    });
+    withCounts.sort((a, b) => b.txCount - a.txCount);
+    return {
+      variants: withCounts,
+      selected: withCounts[0].name, // default: highest tx count
+      tier,
+      included: tier === 'safe',    // safe groups auto-included; review groups opt-in
+    };
+  }
+
+  function handleGroupToggle(groupIndex) {
+    setDuplicateGroups(prev => {
+      const next = [...prev];
+      next[groupIndex] = { ...next[groupIndex], included: !next[groupIndex].included };
+      return next;
+    });
   }
 
   function handleGroupSelect(groupIndex, selectedName) {
@@ -390,6 +466,7 @@ export default function Payees() {
     if (!duplicateGroups) return;
 
     const merges = duplicateGroups
+      .filter(g => g.included)
       .map(g => ({
         from: g.variants.map(v => v.name),
         to: g.selected,
@@ -555,6 +632,10 @@ export default function Payees() {
 
   const bulkEditCount = Object.values(bulkEdits).filter(v => v && v.trim()).length;
 
+  const safeCount = (duplicateGroups || []).filter(g => g.tier === 'safe').length;
+  const reviewCount = (duplicateGroups || []).length - safeCount;
+  const includedGroups = (duplicateGroups || []).filter(g => g.included).length;
+
   if (loading) return <LoadingSpinner />;
 
   return (
@@ -576,13 +657,20 @@ export default function Payees() {
         </div>
       )}
 
-      {/* Duplicate groups — batch merge UI */}
+      {/* Duplicate groups — batch merge UI (Safe / Review tiers) */}
       {duplicateGroups && duplicateGroups.length > 0 && (
         <div className="mb-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-zinc-700">
-              {duplicateGroups.length} duplicate group{duplicateGroups.length > 1 ? 's' : ''} found
-            </h2>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-sm font-semibold text-zinc-700">
+                {duplicateGroups.length} duplicate group{duplicateGroups.length > 1 ? 's' : ''} found
+              </h2>
+              {reviewCount > 0 && (
+                <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                  {safeCount} safe · {reviewCount} to review
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={handleClearDuplicates}
@@ -592,53 +680,86 @@ export default function Payees() {
               </button>
               <button
                 onClick={handleBatchMerge}
-                disabled={saving}
+                disabled={saving || includedGroups === 0}
                 className="bg-zinc-800 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-zinc-700 disabled:opacity-50 transition-colors"
               >
-                {saving ? 'Saving...' : `Save All (${duplicateGroups.length} groups)`}
+                {saving ? 'Saving...' : `Save All${includedGroups ? ` (${includedGroups} group${includedGroups > 1 ? 's' : ''})` : ''}`}
               </button>
             </div>
           </div>
 
-          {duplicateGroups.map((group, gi) => (
-            <div key={gi} className="card border border-zinc-200">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Group {gi + 1}</span>
-                <span className="text-xs text-zinc-400">·</span>
-                <span className="text-xs text-zinc-400">{group.variants.length} variants</span>
-              </div>
-              <div className="space-y-1.5">
-                {group.variants.map((v) => {
-                  const isSelected = group.selected === v.name;
-                  return (
-                    <button
-                      key={v.name}
-                      onClick={() => handleGroupSelect(gi, v.name)}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${
-                        isSelected
-                          ? 'bg-zinc-100 border border-zinc-300'
-                          : 'border border-transparent hover:bg-zinc-50'
-                      }`}
-                    >
-                      <Circle
-                        className={`w-4 h-4 flex-shrink-0 ${isSelected ? 'text-zinc-700 fill-zinc-700' : 'text-zinc-300'}`}
-                        strokeWidth={1.5}
+          {duplicateGroups.map((group, gi) => {
+            const isSafe = group.tier === 'safe';
+            return (
+              <div key={gi} className={`card border ${isSafe ? 'border-zinc-200' : 'border-amber-200'}`}>
+                <div className="flex items-center gap-2 mb-3 flex-wrap">
+                  <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Group {gi + 1}</span>
+                  <span className="text-xs text-zinc-400">·</span>
+                  <span className="text-xs text-zinc-400">{group.variants.length} variants</span>
+                  {isSafe ? (
+                    <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+                      <ShieldCheck className="w-3 h-3" strokeWidth={1.5} /> Safe
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                      <AlertTriangle className="w-3 h-3" strokeWidth={1.5} /> Review
+                    </span>
+                  )}
+                  {!isSafe && (
+                    <label className="ml-auto flex items-center gap-1.5 text-xs text-zinc-600 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={group.included}
+                        onChange={() => handleGroupToggle(gi)}
+                        className="accent-zinc-900"
                       />
-                      <div className="flex-1 min-w-0">
-                        <span className={`text-sm ${isSelected ? 'text-zinc-900 font-medium' : 'text-zinc-600'}`}>
-                          {v.name}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-3 flex-shrink-0">
-                        <span className="text-xs text-zinc-400 tabular-nums">{v.txCount} tx</span>
-                        <span className="text-xs text-zinc-400 tabular-nums">{v.stmtCount} mo</span>
-                      </div>
-                    </button>
-                  );
-                })}
+                      Include in merge
+                    </label>
+                  )}
+                </div>
+                {!isSafe && (
+                  <p className="text-xs text-amber-700 mb-3">
+                    These names share a base payee but differ by extra details (e.g. ADVANCE, STAFF, INSTALMENT, date
+                    prefixes) and may be separate payments. Only include if you're sure they're the same.
+                  </p>
+                )}
+                <div className="space-y-1.5">
+                  {group.variants.map((v) => {
+                    const isSelected = group.selected === v.name;
+                    const enabled = isSafe || group.included;
+                    return (
+                      <button
+                        key={v.name}
+                        onClick={() => enabled && handleGroupSelect(gi, v.name)}
+                        disabled={!enabled}
+                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${
+                          !enabled
+                            ? 'opacity-50 cursor-not-allowed'
+                            : isSelected
+                              ? 'bg-zinc-100 border border-zinc-300'
+                              : 'border border-transparent hover:bg-zinc-50'
+                        }`}
+                      >
+                        <Circle
+                          className={`w-4 h-4 flex-shrink-0 ${!enabled ? 'text-zinc-300' : isSelected ? 'text-zinc-700 fill-zinc-700' : 'text-zinc-300'}`}
+                          strokeWidth={1.5}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <span className={`text-sm ${isSelected && enabled ? 'text-zinc-900 font-medium' : 'text-zinc-600'}`}>
+                            {v.name}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 flex-shrink-0">
+                          <span className="text-xs text-zinc-400 tabular-nums">{v.txCount} tx</span>
+                          <span className="text-xs text-zinc-400 tabular-nums">{v.stmtCount} mo</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -650,7 +771,7 @@ export default function Payees() {
               <label className="label">Year</label>
               <Select
                 value={year}
-                onChange={(v) => { yearTouched.current = true; setYear(v); setSelected(new Set()); setMergeTarget(null); }}
+                onChange={(v) => { setYear(v); setSelected(new Set()); setMergeTarget(null); }}
                 placeholder="All years"
                 options={[{ value: '', label: 'All years' }, ...allYears.map(y => ({ value: String(y), label: String(y) }))]}
               />
@@ -728,23 +849,7 @@ export default function Payees() {
               <Sparkles className="w-3.5 h-3.5" strokeWidth={1.5} />
               Find Duplicates
             </button>
-            {bulkEditMode ? (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={cancelBulkEdit}
-                  className="border border-zinc-300 bg-transparent text-zinc-500 rounded-lg px-3 py-1.5 text-xs hover:bg-zinc-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleBulkSave}
-                  disabled={bulkEditCount === 0}
-                  className="bg-zinc-800 text-white rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-zinc-700 disabled:opacity-50 transition-colors"
-                >
-                  Save All{bulkEditCount > 0 ? ` (${bulkEditCount})` : ''}
-                </button>
-              </div>
-            ) : (
+            {!bulkEditMode && (
               <button
                 onClick={enterBulkEdit}
                 className="border border-zinc-300 bg-transparent text-zinc-700 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-zinc-50 transition-colors flex items-center gap-1.5"
@@ -753,42 +858,6 @@ export default function Payees() {
                 <Pencil className="w-3.5 h-3.5" strokeWidth={1.5} />
                 Edit All
               </button>
-            )}
-            {selectedList.length >= 2 && (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-zinc-500">{selectedList.length} selected</span>
-                {!mergeTarget ? (
-                  <button
-                    onClick={() => setMergeTarget(selectedList[0])}
-                    className="border border-zinc-300 bg-transparent text-zinc-700 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-zinc-50 transition-colors flex items-center gap-1.5"
-                  >
-                    <Merge className="w-3.5 h-3.5" strokeWidth={1.5} />
-                    Merge Selected
-                  </button>
-                ) : (
-                  <>
-                    <span className="text-xs text-zinc-400">into</span>
-                    <Select
-                      value={mergeTarget}
-                      onChange={setMergeTarget}
-                      options={selectedList.map(name => ({ value: name, label: name }))}
-                      buttonClassName="px-2.5 py-1 text-xs min-w-[180px]"
-                    />
-                    <button
-                      onClick={handleMerge}
-                      className="border border-zinc-300 bg-transparent text-zinc-700 rounded-lg px-3 py-1 text-xs font-medium hover:bg-zinc-50 transition-colors"
-                    >
-                      Merge
-                    </button>
-                    <button
-                      onClick={() => setMergeTarget(null)}
-                      className="p-1 rounded-md text-zinc-400 hover:text-zinc-600"
-                    >
-                      <X className="w-3.5 h-3.5" strokeWidth={1.5} />
-                    </button>
-                  </>
-                )}
-              </div>
             )}
           </div>
         </div>
@@ -933,6 +1002,76 @@ export default function Payees() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* Floating action bar — merge (2+ selected) / bulk edit save */}
+      {(selected.size >= 2 || bulkEditMode) && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 no-print bg-white border border-zinc-200 rounded-xl shadow-lg px-4 py-2.5 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-4 duration-200">
+          {bulkEditMode ? (
+            <>
+              <span className="text-xs text-zinc-500">Editing payee names</span>
+              <div className="w-px h-4 bg-zinc-200" />
+              <button
+                onClick={cancelBulkEdit}
+                className="border border-zinc-300 bg-transparent text-zinc-500 rounded-lg px-3 py-1.5 text-xs hover:bg-zinc-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkSave}
+                disabled={bulkEditCount === 0}
+                className="bg-zinc-800 text-white rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+              >
+                Save All{bulkEditCount > 0 ? ` (${bulkEditCount})` : ''}
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="text-xs text-zinc-600 font-medium tabular-nums">
+                {selectedList.length} selected
+              </span>
+              <button
+                onClick={() => { setSelected(new Set()); setMergeTarget(null); }}
+                className="p-1.5 rounded-md text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 transition-colors"
+                title="Clear selection"
+              >
+                <X className="w-4 h-4" strokeWidth={1.5} />
+              </button>
+              <div className="w-px h-4 bg-zinc-200" />
+              {!mergeTarget ? (
+                <button
+                  onClick={() => setMergeTarget(selectedList[0])}
+                  className="border border-zinc-300 bg-transparent text-zinc-700 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-zinc-50 transition-colors flex items-center gap-1.5"
+                >
+                  <Merge className="w-3.5 h-3.5" strokeWidth={1.5} />
+                  Merge Selected
+                </button>
+              ) : (
+                <>
+                  <span className="text-xs text-zinc-400">into</span>
+                  <Select
+                    value={mergeTarget}
+                    onChange={setMergeTarget}
+                    options={selectedList.map(name => ({ value: name, label: name }))}
+                    buttonClassName="px-2.5 py-1 text-xs min-w-[180px]"
+                  />
+                  <button
+                    onClick={handleMerge}
+                    className="bg-zinc-800 text-white rounded-lg px-3 py-1 text-xs font-medium hover:bg-zinc-700 transition-colors"
+                  >
+                    Merge
+                  </button>
+                  <button
+                    onClick={() => setMergeTarget(null)}
+                    className="p-1 rounded-md text-zinc-400 hover:text-zinc-600"
+                  >
+                    <X className="w-3.5 h-3.5" strokeWidth={1.5} />
+                  </button>
+                </>
+              )}
+            </>
+          )}
         </div>
       )}
 
