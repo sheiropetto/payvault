@@ -237,24 +237,24 @@ export default function CashFlow({ direction }) {
         <meta charset="utf-8" />
         <title>${esc(title)} Report</title>
         <style>
-          @page { size: A4 landscape; margin: 10mm; }
+          @page { size: A4 landscape; margin: 12mm; }
           * { box-sizing: border-box; }
-          body { font-family: 'Inter', system-ui, sans-serif; color: #18181b; margin: 0; font-size: 12px; }
-          .report-head { text-align: center; margin-bottom: 18px; }
-          .report-head h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
-          .report-head p { font-size: 12px; color: #52525b; margin: 2px 0; }
-          .summary-cards { display: flex; gap: 10px; }
-          .summary-card { flex: 1; border: 1px solid #e4e4e7; border-radius: 8px; padding: 10px 12px; }
-          .summary-card .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: #52525b; }
-          .summary-card .val { font-size: 15px; font-weight: 600; margin-top: 4px; }
-          .summary-card .sub { font-size: 10px; color: #71717a; margin-top: 2px; word-break: break-word; }
-          .report-section { margin-top: 20px; }
-          .report-section h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px; padding-bottom: 4px; border-bottom: 2px solid #e4e4e7; }
+          body { font-family: 'Inter', system-ui, sans-serif; color: #18181b; margin: 0; font-size: 14px; }
+          .report-head { text-align: center; margin-bottom: 22px; }
+          .report-head h1 { font-size: 26px; font-weight: 700; margin: 0 0 6px; }
+          .report-head p { font-size: 14px; color: #52525b; margin: 3px 0; }
+          .summary-cards { display: flex; gap: 12px; }
+          .summary-card { flex: 1; border: 1px solid #d4d4d8; border-radius: 10px; padding: 14px 16px; }
+          .summary-card .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #52525b; }
+          .summary-card .val { font-size: 19px; font-weight: 700; margin-top: 6px; }
+          .summary-card .sub { font-size: 12px; color: #71717a; margin-top: 4px; word-break: break-word; }
+          .report-section { margin-top: 24px; }
+          .report-section h2 { font-size: 17px; font-weight: 700; margin: 0 0 10px; padding-bottom: 6px; border-bottom: 2px solid #d4d4d8; }
           .keep { page-break-inside: avoid; }
-          table { width: 100%; border-collapse: collapse; font-size: 10px; }
+          table { width: 100%; border-collapse: collapse; font-size: 13px; }
           thead { display: table-header-group; }
-          th { text-align: left; text-transform: uppercase; font-size: 8px; letter-spacing: 0.05em; color: #52525b; padding: 5px 8px; border-bottom: 1px solid #d4d4d8; background: #fafafa; }
-          td { padding: 5px 8px; border-bottom: 1px solid #ececee; vertical-align: top; }
+          th { text-align: left; text-transform: uppercase; font-size: 10px; letter-spacing: 0.06em; color: #52525b; padding: 7px 10px; border-bottom: 1px solid #d4d4d8; background: #fafafa; }
+          td { padding: 7px 10px; border-bottom: 1px solid #ececee; vertical-align: top; }
           .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
           .nowrap { white-space: nowrap; }
           .strong { font-weight: 600; }
@@ -291,15 +291,19 @@ export default function CashFlow({ direction }) {
       periodRows = MONTH_NAMES.map((mn, i) =>
         `<tr><td>${mn}</td><td class="num">${map[i + 1] ? formatCurrency(map[i + 1]) : ''}</td></tr>`
       ).join('');
+      periodRows += `<tr class="total"><td>Total (${yearLabel})</td><td class="num strong">${formatCurrency(total)}</td></tr>`;
     } else {
       periodRows = (data?.by_year || [])
         .map(y => `<tr><td>${esc(String(y.year))}</td><td class="num">${formatCurrency(Number(isIn ? y.credit : y.debit) || 0)}</td></tr>`)
         .join('');
+      if ((data?.by_year || []).length) {
+        periodRows += `<tr class="total"><td>Total (all years)</td><td class="num strong">${formatCurrency(total)}</td></tr>`;
+      }
     }
 
-    // Top counterparties (report stays concise: top 10)
-    const reportTopPayees = topPayees.slice(0, 10);
-    const topRows = reportTopPayees.map(p =>
+    // All counterparties, ranked top → least
+    const reportPayees = topPayees;
+    const topRows = reportPayees.map(p =>
       `<tr><td>${esc(p.name)}</td><td class="num">${formatCurrency(p.value)}</td><td class="num">${maxPayee ? ((p.value / maxPayee) * 100).toFixed(1) : '0.0'}%</td></tr>`
     ).join('');
 
@@ -307,19 +311,6 @@ export default function CashFlow({ direction }) {
     const catRows = categories.map(c =>
       `<tr><td>${esc(c.name)}</td><td class="num">${c.count}</td><td class="num">${formatCurrency(c.value)}</td><td class="num">${maxCat ? ((c.value / maxCat) * 100).toFixed(1) : '0.0'}%</td></tr>`
     ).join('');
-
-    // Transactions drill-down
-    const txRows = filteredRows.map(tx =>
-      `<tr>
-        <td class="nowrap">${esc(tx.date)}</td>
-        <td>${esc(tx.description)}</td>
-        <td>${esc(tx.particulars)}</td>
-        <td>${esc(tx.payee)}</td>
-        <td>${esc(tx.category)}</td>
-        <td class="num">${formatCurrency(Number(isIn ? tx.credit_amount : tx.debit_amount) || 0)}</td>
-      </tr>`
-    ).join('');
-    const txTotal = filteredRows.reduce((s, tx) => s + (Number(isIn ? tx.credit_amount : tx.debit_amount) || 0), 0);
 
     const html = `
       <div class="report-head">
@@ -343,8 +334,8 @@ export default function CashFlow({ direction }) {
       </div>
 
       ${topRows ? `
-      <div class="report-section keep">
-        <h2>Top ${isIn ? 'Sources' : 'Payees'} (${reportTopPayees.length})</h2>
+      <div class="report-section">
+        <h2>All ${isIn ? 'Sources' : 'Payees'} (${reportPayees.length})</h2>
         <table>
           <thead><tr><th>Name</th><th class="num">${amountLabel}</th><th class="num">% of Total</th></tr></thead>
           <tbody>${topRows}</tbody>
@@ -358,20 +349,7 @@ export default function CashFlow({ direction }) {
           <thead><tr><th>Category</th><th class="num">Txns</th><th class="num">${amountLabel}</th><th class="num">% of Total</th></tr></thead>
           <tbody>${catRows}</tbody>
         </table>
-      </div>` : ''}
-
-      <div class="report-section">
-        <h2>Transactions (${filteredRows.length})</h2>
-        <table>
-          <thead>
-            <tr><th>Date</th><th>Description</th><th>Particulars</th><th>Payee</th><th>Category</th><th class="num">${amountLabel}</th></tr>
-          </thead>
-          <tbody>
-            ${txRows}
-            <tr class="total"><td colspan="5">Total (${filteredRows.length} transactions)</td><td class="num strong">${formatCurrency(txTotal)}</td></tr>
-          </tbody>
-        </table>
-      </div>`;
+      </div>` : ''}`;
 
     printHTML(html);
   }
