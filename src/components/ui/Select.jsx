@@ -4,6 +4,7 @@ import { ChevronDown, Check, Search } from 'lucide-react';
 export default function Select({ value, onChange, options, className, buttonClassName, placeholder = 'Select...', searchable = false }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [dropUp, setDropUp] = useState(false);
   const containerRef = useRef(null);
   const searchRef = useRef(null);
 
@@ -26,6 +27,21 @@ export default function Select({ value, onChange, options, className, buttonClas
     }
   }, [open, searchable]);
 
+  // Open the menu toward whichever side has more room, so it never gets clipped
+  // at the bottom of the viewport (e.g. the merge picker in the floating bar).
+  function handleToggle() {
+    if (!open) {
+      const el = containerRef.current;
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        const spaceAbove = rect.top;
+        const spaceBelow = window.innerHeight - rect.bottom;
+        setDropUp(spaceAbove > spaceBelow);
+      }
+    }
+    setOpen(!open);
+  }
+
   const selectedOption = options.find(opt => opt.value === value);
 
   const filteredOptions = searchable && search
@@ -36,7 +52,7 @@ export default function Select({ value, onChange, options, className, buttonClas
     <div className={`relative ${className || ''}`} ref={containerRef}>
       <button
         type="button"
-        onClick={() => setOpen(!open)}
+        onClick={handleToggle}
         className={`w-full flex items-center justify-between rounded-lg border border-zinc-300 bg-white text-zinc-900 shadow-sm transition-all duration-150 hover:border-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-900 ${buttonClassName || 'px-3 py-2 text-sm'}`}
       >
         <span className={`truncate ${selectedOption ? 'text-zinc-900' : 'text-zinc-400'}`}>
@@ -46,7 +62,9 @@ export default function Select({ value, onChange, options, className, buttonClas
       </button>
 
       {open && (
-        <div className="absolute left-0 right-0 mt-1 rounded-lg border border-zinc-200 bg-white shadow-lg z-50 animate-in fade-in slide-in-from-top-1 duration-100">
+        <div className={`absolute left-0 right-0 rounded-lg border border-zinc-200 bg-white shadow-lg z-50 animate-in fade-in duration-100 ${
+          dropUp ? 'bottom-full mb-1 slide-in-from-bottom-1' : 'mt-1 slide-in-from-top-1'
+        }`}>
           {searchable && (
             <div className="relative px-2 pt-2 pb-1">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400 pointer-events-none" strokeWidth={1.5} />
