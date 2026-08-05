@@ -7,7 +7,7 @@ import { authenticate } from '../utils/auth';
 //   summary      — total debit/credit + counts
 //   by_month     — per-month debit/credit (when a year is given; 12 months)
 //   by_year      — per-year debit/credit (when NO year is given)
-//   by_payee     — per-payee debit/credit (top 50 by combined value)
+//   by_payee     — per-payee debit/credit (ALL payees, ranked by combined value)
 //   by_category  — per-category debit/credit + tx count
 //   transactions — the drill-down rows for the selected scope
 export async function onRequest(context) {
@@ -74,7 +74,7 @@ export async function onRequest(context) {
       by_year = y;
     }
 
-    // ── By payee (top 50) ──
+    // ── By payee (all, ranked) ──
     const { results: by_payee } = await env.DB.prepare(`
       SELECT t.payee,
         COALESCE(ROUND(SUM(t.debit_amount), 2), 0) as debit,
@@ -84,7 +84,6 @@ export async function onRequest(context) {
       WHERE bs.company_id = ?${yearClause} AND t.payee IS NOT NULL AND t.payee != ''
       GROUP BY t.payee
       ORDER BY (SUM(t.debit_amount) + SUM(t.credit_amount)) DESC
-      LIMIT 50
     `).bind(...params).all();
 
     // ── By category ──

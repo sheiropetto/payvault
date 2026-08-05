@@ -228,14 +228,14 @@ export default function CashFlow({ direction }) {
     return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  function printHTML(html) {
+  function printHTML(html, docTitle) {
     const win = window.open('', '_blank');
     win.document.write(`
       <!DOCTYPE html>
       <html lang="en">
       <head>
         <meta charset="utf-8" />
-        <title>${esc(title)} Report</title>
+        <title>${esc(docTitle || `${title} Report`)}</title>
         <style>
           @page { size: A4 portrait; margin: 12mm; }
           * { box-sizing: border-box; }
@@ -248,9 +248,19 @@ export default function CashFlow({ direction }) {
           .summary-card .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #52525b; }
           .summary-card .val { font-size: 19px; font-weight: 700; margin-top: 6px; }
           .summary-card .sub { font-size: 12px; color: #71717a; margin-top: 4px; word-break: break-word; }
+          .chart { display: block; width: 100%; max-width: 760px; margin: 4px auto 2px; }
           .report-section { margin-top: 24px; }
           .report-section h2 { font-size: 17px; font-weight: 700; margin: 0 0 10px; padding-bottom: 6px; border-bottom: 2px solid #d4d4d8; }
           .keep { page-break-inside: avoid; }
+          .sources { display: grid; grid-template-columns: 1fr 1fr; column-gap: 28px; row-gap: 5px; }
+          .source-row { display: flex; align-items: center; gap: 10px; padding: 2px 0; }
+          .source-row .rank { width: 16px; flex-shrink: 0; text-align: right; font-size: 11px; color: #a1a1aa; font-variant-numeric: tabular-nums; }
+          .source-main { flex: 1; min-width: 0; }
+          .source-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 12px; margin-bottom: 3px; }
+          .source-name { color: #27272a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .source-val { color: #52525b; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+          .source-bar { height: 5px; background: #f4f4f5; border-radius: 999px; overflow: hidden; }
+          .source-fill { height: 100%; border-radius: 999px; opacity: 0.75; }
           table { width: 100%; border-collapse: collapse; font-size: 13px; }
           thead { display: table-header-group; }
           th { text-align: left; text-transform: uppercase; font-size: 10px; letter-spacing: 0.06em; color: #52525b; padding: 7px 10px; border-bottom: 1px solid #d4d4d8; background: #fafafa; }
@@ -301,11 +311,48 @@ export default function CashFlow({ direction }) {
       }
     }
 
-    // All counterparties, ranked top → least
+    // ── Monthly (or yearly) bar chart (graphical) ──
+    function barChartSVG() {
+      const W = 760, H = 300;
+      const padT = 32, padR = 8, padB = 46, padL = 8;
+      const plotW = W - padL - padR;
+      const plotH = H - padT - padB;
+      const n = bars.length;
+      const slot = plotW / n;
+      const barW = Math.max(12, Math.min(44, slot * 0.6));
+      const maxV = Math.max(1, ...bars.map(b => b.value));
+      const color = isIn ? '#10b981' : '#27272a';
+      const body = bars.map((b, i) => {
+        const x = padL + slot * i + (slot - barW) / 2;
+        const h = (b.value / maxV) * plotH;
+        const y = padT + (plotH - h);
+        let s = '';
+        if (b.value > 0) {
+          s += `<text x="${x + barW / 2}" y="${y - 6}" text-anchor="middle" font-size="11" font-weight="600" fill="#52525b">${formatCompact(b.value)}</text>`;
+        }
+        s += `<rect x="${x}" y="${y}" width="${barW}" height="${Math.max(0, h)}" rx="3" fill="${color}" />`;
+        s += `<text x="${x + barW / 2}" y="${padT + plotH + 22}" text-anchor="middle" font-size="11" fill="#52525b">${b.label}</text>`;
+        return s;
+      }).join('');
+      return `<svg class="chart" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${body}</svg>`;
+    }
+    const chartHTML = barChartSVG();
+
+    // ── Graphical sources / payees (ranked list with thin bars) ──
     const reportPayees = topPayees;
-    const topRows = reportPayees.map(p =>
-      `<tr><td>${esc(p.name)}</td><td class="num">${formatCurrency(p.value)}</td><td class="num">${maxPayee ? ((p.value / maxPayee) * 100).toFixed(1) : '0.0'}%</td></tr>`
-    ).join('');
+    const maxSource = Math.max(1, ...reportPayees.map(p => p.value));
+    const barColor = isIn ? '#10b981' : '#27272a';
+    const sourceRows = reportPayees.map((p, i) => `
+      <div class="source-row">
+        <span class="rank">${i + 1}</span>
+        <div class="source-main">
+          <div class="source-top">
+            <span class="source-name">${esc(p.name)}</span>
+            <span class="source-val">${formatCurrency(p.value)}</span>
+          </div>
+          <div class="source-bar"><div class="source-fill" style="width:${(p.value / maxSource) * 100}%;background:${barColor}"></div></div>
+        </div>
+      </div>`).join('');
 
     // Categories
     const catRows = categories.map(c =>
@@ -327,19 +374,17 @@ export default function CashFlow({ direction }) {
 
       <div class="report-section keep">
         <h2>${year ? `Monthly ${directionLabel} — ${yearLabel}` : `${directionLabel} by Year`}</h2>
+        ${chartHTML}
         <table>
           <thead><tr><th>${year ? 'Month' : 'Year'}</th><th class="num">${amountLabel}</th></tr></thead>
           <tbody>${periodRows}</tbody>
         </table>
       </div>
 
-      ${topRows ? `
+      ${sourceRows ? `
       <div class="report-section">
-        <h2>All ${isIn ? 'Sources' : 'Payees'} (${reportPayees.length})</h2>
-        <table>
-          <thead><tr><th>Name</th><th class="num">${amountLabel}</th><th class="num">% of Total</th></tr></thead>
-          <tbody>${topRows}</tbody>
-        </table>
+        <h2>${isIn ? 'Top Sources' : 'Top Payees'} (${reportPayees.length})</h2>
+        <div class="sources">${sourceRows}</div>
       </div>` : ''}
 
       ${catRows ? `
@@ -351,7 +396,7 @@ export default function CashFlow({ direction }) {
         </table>
       </div>` : ''}`;
 
-    printHTML(html);
+    printHTML(html, `${directionLabel} Report ${yearLabel}`);
   }
 
   if (loading) return <LoadingSpinner />;
