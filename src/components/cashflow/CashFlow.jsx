@@ -249,9 +249,10 @@ export default function CashFlow({ direction }) {
           .summary-card .val { font-size: 19px; font-weight: 700; margin-top: 6px; }
           .summary-card .sub { font-size: 12px; color: #71717a; margin-top: 4px; word-break: break-word; }
           .chart { display: block; width: 100%; max-width: 760px; margin: 4px auto 2px; }
-          .report-section { margin-top: 24px; }
+          .report-section { margin-top: 20px; }
           .report-section h2 { font-size: 17px; font-weight: 700; margin: 0 0 10px; padding-bottom: 6px; border-bottom: 2px solid #d4d4d8; }
           .keep { page-break-inside: avoid; }
+          .page-break { break-before: page; page-break-before: always; }
           .sources { display: grid; grid-template-columns: 1fr; row-gap: 5px; }
           .source-row { display: flex; align-items: center; gap: 10px; padding: 2px 0; }
           .source-row .rank { width: 16px; flex-shrink: 0; text-align: right; font-size: 11px; color: #a1a1aa; font-variant-numeric: tabular-nums; }
@@ -263,8 +264,8 @@ export default function CashFlow({ direction }) {
           .source-fill { height: 100%; border-radius: 999px; opacity: 0.75; }
           table { width: 100%; border-collapse: collapse; font-size: 13px; }
           thead { display: table-header-group; }
-          th { text-align: left; text-transform: uppercase; font-size: 10px; letter-spacing: 0.06em; color: #52525b; padding: 7px 10px; border-bottom: 1px solid #d4d4d8; background: #fafafa; }
-          td { padding: 7px 10px; border-bottom: 1px solid #ececee; vertical-align: top; }
+          th { text-align: left; text-transform: uppercase; font-size: 10px; letter-spacing: 0.06em; color: #52525b; padding: 6px 10px; border-bottom: 1px solid #d4d4d8; background: #fafafa; }
+          td { padding: 6px 10px; border-bottom: 1px solid #ececee; vertical-align: top; }
           .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
           .nowrap { white-space: nowrap; }
           .strong { font-weight: 600; }
@@ -313,7 +314,7 @@ export default function CashFlow({ direction }) {
 
     // ── Monthly (or yearly) bar chart (graphical) ──
     function barChartSVG() {
-      const W = 760, H = 300;
+      const W = 760, H = 240;
       const padT = 32, padR = 8, padB = 46, padL = 8;
       const plotW = W - padL - padR;
       const plotH = H - padT - padB;
@@ -382,7 +383,7 @@ export default function CashFlow({ direction }) {
       </div>
 
       ${sourceRows ? `
-      <div class="report-section">
+      <div class="report-section page-break">
         <h2>${isIn ? 'All Sources' : 'All Payees'} (${reportPayees.length})</h2>
         <div class="sources">${sourceRows}</div>
       </div>` : ''}
