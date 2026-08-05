@@ -252,7 +252,7 @@ export default function CashFlow({ direction }) {
           .report-section { margin-top: 24px; }
           .report-section h2 { font-size: 17px; font-weight: 700; margin: 0 0 10px; padding-bottom: 6px; border-bottom: 2px solid #d4d4d8; }
           .keep { page-break-inside: avoid; }
-          .sources { display: grid; grid-template-columns: 1fr 1fr; column-gap: 28px; row-gap: 5px; }
+          .sources { display: grid; grid-template-columns: 1fr; row-gap: 5px; }
           .source-row { display: flex; align-items: center; gap: 10px; padding: 2px 0; }
           .source-row .rank { width: 16px; flex-shrink: 0; text-align: right; font-size: 11px; color: #a1a1aa; font-variant-numeric: tabular-nums; }
           .source-main { flex: 1; min-width: 0; }
@@ -383,7 +383,7 @@ export default function CashFlow({ direction }) {
 
       ${sourceRows ? `
       <div class="report-section">
-        <h2>${isIn ? 'Top Sources' : 'Top Payees'} (${reportPayees.length})</h2>
+        <h2>${isIn ? 'All Sources' : 'All Payees'} (${reportPayees.length})</h2>
         <div class="sources">${sourceRows}</div>
       </div>` : ''}
 
